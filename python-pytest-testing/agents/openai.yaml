@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Pytest Testing"
+  short_description: "Проектирование тестов Python на pytest"
+  default_prompt: "Используй $python-pytest-testing для написания unit- или integration-тестов на pytest."

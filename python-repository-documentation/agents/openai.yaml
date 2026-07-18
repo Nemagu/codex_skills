@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Repository Documentation"
+  short_description: "Документирование Python-репозиториев"
+  default_prompt: "Используй $python-repository-documentation для обновления README, архитектурной документации или docstring."

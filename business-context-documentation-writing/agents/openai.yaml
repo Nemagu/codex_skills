@@ -1,0 +1,4 @@
+interface:
+  display_name: "Документация бизнес-контекстов"
+  short_description: "Документирование контекстов и CQRS-пайплайнов"
+  default_prompt: "Используй $business-context-documentation-writing для подготовки документации бизнес-контекста и его CQRS-пайплайнов."

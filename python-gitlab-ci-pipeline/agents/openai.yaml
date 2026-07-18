@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python GitLab CI Pipeline"
+  short_description: "Настройка GitLab CI для Python-сервисов"
+  default_prompt: "Используй $python-gitlab-ci-pipeline для создания или обновления пайплайна Python-сервиса."

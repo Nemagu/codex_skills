@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Subscription Worker"
+  short_description: "Разработка периодических Python-воркеров"
+  default_prompt: "Используй $python-subscription-worker для реализации периодического background worker без брокера."

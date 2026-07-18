@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python CQRS Application Layer"
+  short_description: "Проектирование прикладного CQRS-слоя Python"
+  default_prompt: "Используй $python-cqrs-application-layer-writing для реализации команды или запроса в прикладном слое."

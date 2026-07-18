@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python FastAPI API Worker"
+  short_description: "Сборка HTTP API-воркера на FastAPI"
+  default_prompt: "Используй $python-fastapi-api-worker для сборки APIWorker, middleware, lifespan и запуска Uvicorn."

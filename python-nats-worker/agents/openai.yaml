@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python NATS Worker"
+  short_description: "Разработка NATS JetStream-воркеров"
+  default_prompt: "Используй $python-nats-worker для реализации consumer или publisher поверх NATS JetStream."

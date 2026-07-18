@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python DDD Domain Layer"
+  short_description: "Проектирование доменного слоя Python DDD"
+  default_prompt: "Используй $python-ddd-domain-layer-writing для реализации агрегата, value object или доменного сервиса."

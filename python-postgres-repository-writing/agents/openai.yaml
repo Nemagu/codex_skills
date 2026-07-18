@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Postgres Repository"
+  short_description: "Реализация Postgres-репозиториев Python"
+  default_prompt: "Используй $python-postgres-repository-writing для реализации безопасного Postgres-репозитория на psycopg."
