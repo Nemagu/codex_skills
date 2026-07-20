@@ -18,9 +18,15 @@ docs/
 ├── pipelines/
 │   ├── README.md
 │   ├── operations/
-│   │   ├── commands/<business-group>/
-│   │   └── queries/<business-group>/
-│   └── scenarios/<business-group>/
+│   │   ├── commands/
+│   │   │   ├── user/<business-group>/
+│   │   │   └── system/<source-or-business-group>/
+│   │   └── queries/
+│   │       ├── user/<business-group>/
+│   │       └── system/<source-or-business-group>/
+│   └── scenarios/
+│       ├── user/<business-group>/
+│       └── system/<source-or-business-group>/
 └── events/
     └── <non-domain-category>/
 ```
@@ -34,6 +40,11 @@ docs/
 
 Канонические команды и запросы хранить в `pipelines/operations`. Составные пайплайны
 хранить в `pipelines/scenarios` и ссылаться из них на операции, не копируя описание.
+
+Каталоги `user` и `system` создавать только при наличии обоих видов операций или
+когда разделение улучшает навигацию. Межконтекстные операции группировать внутри
+`system` по контексту-источнику. Не создавать разные документы только из-за HTTP,
+брокера, CLI или другого адаптера при одинаковом application-контракте.
 
 После создания файла обновлять существующий индекс или навигацию, например
 `SUMMARY.md`, только если такой механизм уже используется. Ссылки делать
