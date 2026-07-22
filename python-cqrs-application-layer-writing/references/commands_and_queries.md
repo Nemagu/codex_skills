@@ -118,9 +118,9 @@ async def execute(self, command: XxxCommand, extra: SomethingElse) -> ...: ...
 | Цель | мутация состояния | чтение состояния |
 | Return type | `DTO` или `None` | `DTO` или `tuple[list[DTO], int]` |
 | Side effects | да: `read.save` / `version.save` / `outbox.save` | нет |
-| Авторизация (public) | `raise_admin` или иное mutating-право | `raise_reader` |
+| Авторизация (user) | `raise_admin` или иное mutating-право | `raise_reader` |
 | Per-aggregate authorization | `.edit(initiator, [primary])` | `.read(initiator, items)` |
-| Расположение | `command/{public,private}/<aggregate>/<action>.py` | `query/<aggregate>/<action>.py` |
+| Расположение | `command/{user,system}/<aggregate>/<action>.py` | `query/{user,system}/<aggregate>/<action>.py` |
 | Suffix dataclass | `Command` | `Query` |
 | Verb form | императив (`Create`, `Update`, ...) | `Get` / `List` |
 | Транзакционная граница | один UoW для согласованных изменений | без UoW, если транзакция не нужна |

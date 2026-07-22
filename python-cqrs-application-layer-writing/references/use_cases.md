@@ -60,7 +60,7 @@ class BaseUseCase(ABC):
 **Альтернативные варианты:**
 - Базовых классов нет вовсе — каждый use case принимает зависимости через свой `__init__`.
 - Один базовый класс на всё.
-- Много базовых — на каждую категорию (отдельно для public/private/publisher и т.п.).
+- Много базовых — на каждую категорию (отдельно для user/system/publisher и т.п.).
 
 Скил предписывает **принцип**: общие зависимости и helper-ы выносятся в базовые классы; конкретный набор — конвенция конкретного проекта. Если базовых классов в проекте ещё нет — согласуй с пользователем, какой минимум нужно ввести.
 
@@ -105,7 +105,7 @@ class UpdateTenantUseCase(BaseUseCase):
 
 ### Референс-пример (типовой паттерн)
 
-Шаблон, который в большинстве проектов работает как отправная точка для public command. **Не предписание**, а основа для согласования.
+Шаблон, который в большинстве проектов работает как отправная точка для user command. **Не предписание**, а основа для согласования.
 
 ```python
 async def execute(self, command: UpdateTenantCommand) -> TenantDTO:
@@ -116,7 +116,7 @@ async def execute(self, command: UpdateTenantCommand) -> TenantDTO:
     new_status = TenantStatus.from_str(command.status)
     # ──────────────────────────────────────────────────────────
     async with self._uow as uow:
-        # ── Phase 2: initiator + role (public only) ───────────
+        # ── Phase 2: initiator + role (user only) ─────────────
         initiator = await self._initiator(uow, initiator_id, action)
         initiator.raise_admin()
 
@@ -147,7 +147,7 @@ async def execute(self, command: UpdateTenantCommand) -> TenantDTO:
 
 ### Применимость фаз по типу use case
 
-| Фаза | public command | private command | public query |
+| Фаза | user command | system command | user query |
 |---|:-:|:-:|:-:|
 | 1. action + VO + pre-transaction | ✓ | ✓ | ✓ |
 | 2. initiator + role | ✓ (`raise_admin`) | — | ✓ (`raise_reader`) |
@@ -160,9 +160,9 @@ async def execute(self, command: UpdateTenantCommand) -> TenantDTO:
 ## Initiator
 
 Условия применения:
-- **Public use case (command/query)** — обязательный шаг сразу после открытия UoW.
-- **Private use case** — отсутствует. Initiator не передаётся в команду.
-- **Publisher use case** (subtype private) — отсутствует.
+- **User use case (command/query)** — обязательный шаг сразу после открытия UoW.
+- **System use case** — отсутствует. Initiator не передаётся в команду или запрос.
+- **Publisher use case** (подтип system) — отсутствует.
 
 Использование:
 
@@ -191,9 +191,9 @@ initiator.raise_reader()  # для запросов: достаточно reader
 Где в шаблоне: **сразу после загрузки соответствующего агрегата, до мутации**. Для list-запроса — после получения списка, над всеми элементами разом: `policy.read(initiator, items)`.
 
 Применимость:
-- public command → `.edit(initiator, [primary])`.
-- public query → `.read(initiator, items)`.
-- private — отсутствует.
+- user command → `.edit(initiator, [primary])`.
+- user query → `.read(initiator, items)`.
+- system — отсутствует.
 
 Если в домене такого сервиса нет — согласуй с пользователем форму авторизации.
 
