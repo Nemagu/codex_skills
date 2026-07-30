@@ -1,0 +1,4 @@
+interface:
+  display_name: "Документация доменной модели"
+  short_description: "Аналитические спецификации DDD-модели"
+  default_prompt: "Используй $ddd-domain-documentation-writing для подготовки документации доменной модели."

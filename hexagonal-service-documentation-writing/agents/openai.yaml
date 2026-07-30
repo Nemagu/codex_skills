@@ -1,0 +1,4 @@
+interface:
+  display_name: "Документация гексагонального сервиса"
+  short_description: "Координация документации слоёв и контекстов"
+  default_prompt: "Используй $hexagonal-service-documentation-writing для проектирования структуры и согласования документации сервиса."

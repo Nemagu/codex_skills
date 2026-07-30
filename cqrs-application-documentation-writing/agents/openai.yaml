@@ -1,0 +1,4 @@
+interface:
+  display_name: "Документация CQRS application"
+  short_description: "Спецификации команд, запросов и сценариев"
+  default_prompt: "Используй $cqrs-application-documentation-writing для подготовки документации application-слоя."
