@@ -1,463 +1,244 @@
 ---
 name: python-fastapi-api-worker
-description: Используй при проектировании или реализации HTTP API-воркера на FastAPI в Python-сервисах с гексагональной архитектурой. Триггеры — сборка `APIWorker`-класса, регистрация middleware (включая CORS как outermost), error handlers, lifespan для shared-ресурсов, маршрутизация роутеров, запуск через uvicorn. Не применять для background-воркеров (NATS-consumer/publisher, periodic loops) и для реализации конкретных endpoint-ов.
+description: "Используй при реализации или правке сборки HTTP API-процесса на FastAPI: фабрики приложения, типизированного runtime context, lifespan shared-ресурсов, middleware, error boundary, health endpoints и запуска через Uvicorn. Не применять для определения HTTP-контрактов, реализации конкретных endpoint-ов и transport-моделей, application/domain-логики, persistence-адаптеров и фоновых worker-ов."
 ---
 
-# Python FastAPI API Worker
+# Сборка API-воркера на FastAPI
 
-Скил про сборку HTTP API-воркера на FastAPI: класс `APIWorker`, который инкапсулирует FastAPI-приложение, навешивает обязательный набор middleware (включая CORS), error handlers, lifespan для shared-ресурсов, маршрутизирует роутеры и запускает Uvicorn. За структурой конфига отвечает [python-pydantic-settings-config-writing], за CI-обвязку — [python-gitlab-ci-pipeline]; здесь только сам воркер.
+## Порядок работы
 
-## Quick Start
+1. Извлечь заданные runtime-требования и изучить существующую точку сборки.
+2. Отделить фабрику ASGI-приложения от запуска процесса.
+3. Определить минимальные неизменяемые параметры и зависимости фабрики.
+4. Собрать типизированный runtime context через lifespan.
+5. Зарегистрировать заданные routers, handlers и middleware в явном порядке.
+6. Настроить подходящий режим Uvicorn и graceful shutdown.
+7. Проверить startup, shutdown, ошибки, health endpoints и middleware.
 
-1. Создай класс `APIWorker` в `src/presentation/api/server.py`, принимающий `APIWorkerSettings` в `__init__`.
-2. В `__init__` собери приложение через `FastAPI(lifespan=...)`, передав в lifespan `APILifespan` (`presentation/api/dependencies/lifespan.py`).
-3. Зарегистрируй обязательный набор middleware в строго определённом порядке (см. раздел «Middleware»). **CORS — последним**, чтобы оказаться outermost.
-4. Подключи `setup_error_handler(app)` (см. «Error Handlers»).
-5. Подключи `main_router` через `app.include_router(...)`.
-6. В методе `run()` собери `uvicorn.Config(loop="uvloop", access_log=False, ...)` и запусти `uvicorn.Server(config).run()`.
-7. Точку входа `src/main.py` свяжи с воркером через ветку `MODE=api`.
+Не спрашивать повторно о поведении, однозначно заданном требованиями или кодом.
+Задать вопрос только при противоречии, небезопасном решении или выборе, меняющем
+публичное поведение.
 
-Готовый эталон — [api_worker_template.md](references/api_worker_template.md). Бери целиком, адаптируй имена.
+## Граница ответственности
 
-## When to Apply
+Скил реализует сборку и жизненный цикл HTTP API-процесса. Он не определяет:
 
-### Триггеры активации
+- пути, методы и внешние request/response/error-контракты;
+- transport-модели и преобразования в application-контракты;
+- бизнес-правила, транзакционные границы и Unit of Work;
+- конкретные persistence, broker и другие исходящие адаптеры;
+- структуру и источники конфигурации;
+- фоновые циклы и message consumers.
 
-- Создание или правка `src/presentation/api/server.py` (`APIWorker` или эквивалент).
-- Добавление новой middleware в `src/presentation/api/middlewares/`.
-- Изменение error handler-ов в `src/presentation/api/error_handler.py`.
-- Правка `APILifespan` (shared-ресурсы, попадающие в `app.state`).
-- Регистрация новых верхнеуровневых роутеров в `src/presentation/api/routers/__init__.py`.
-- Запуск через Uvicorn (`access_log`, `loop`, `workers`).
+Не импортировать domain-ошибки и конкретные infrastructure-реализации в
+presentation. Получать application entry points, фабрики ресурсов и
+валидированные параметры из composition root.
 
-### Анти-триггеры
+## Архитектура
 
-- Background-воркеры на FastAPI lifespan (polling-loops, NATS-consumer/publisher, periodic-jobs) — это другой паттерн, не описан здесь.
-- Реализация конкретных endpoint-ов и бизнес-логики роутеров.
-- Структура `infrastructure/config/` (включая `CORSSettings`/`FastAPISettings`/`UvicornSettings`) — это [python-pydantic-settings-config-writing].
-- CI/CD-обвязка и сборка образа — [python-gitlab-ci-pipeline].
+Разделить три роли:
 
-## Package Structure
-
-```
-src/presentation/api/
-├── server.py                   ← APIWorker — собирает FastAPI-app
-├── error_handler.py            ← setup_error_handler — маппинг исключений в HTTP-ответы
-├── dependencies/
-│   ├── __init__.py             ← re-export Depends-функций и APILifespan
-│   ├── lifespan.py             ← APILifespan — инициализирует shared-ресурсы в app.state
-│   ├── db.py                   ← Depends-провайдер UnitOfWork из app.state.db_connection_manager
-│   └── user_id_extractor.py    ← Depends-функция авторизации (читает заголовок, возвращает UUID)
-├── middlewares/
-│   ├── __init__.py             ← re-export классов middleware
-│   ├── logging.py              ← LoggingMiddleware
-│   ├── performance.py          ← PerformanceMiddleware
-│   └── request_id.py           ← RequestIDMiddleware
-├── models/                     ← pydantic-схемы запросов и ответов (HTTP-контракт)
-│   ├── <aggregate>.py          ← <Aggregate>Response, <Aggregate>VersionResponse и т.п.
-│   └── paginator_result.py     ← Generic LimitOffsetPaginatorResult и аналогичные обёртки
-└── routers/                    ← APIRouter-ы, иерархия по слоям доступа
-    ├── __init__.py             ← main_router = APIRouter(); include_router(...)
-    ├── health.py               ← health_router
-    └── public/                 ← публичные роуты с версионированием
-        ├── __init__.py         ← public_router с prefix="/public"
-        └── v1/
-            ├── __init__.py     ← v1_router с prefix="/v1"; include роутеров агрегатов
-            └── <aggregate>.py  ← <aggregate>_router с prefix="/<aggregates>"
+```text
+configuration -> composition root -> application factory -> ASGI application
+                         |
+                         +-----------------------> Uvicorn runner
 ```
 
-## APIWorker
-
-Класс-обёртка над `FastAPI`. Получает все настройки воркера, собирает приложение, экспортирует `run()`.
-
-```python
-class APIWorker:
-    def __init__(self, settings: APIWorkerSettings) -> None:
-        self.settings = settings
-        lifespan = APILifespan(self.settings)
-        self.app = FastAPI(lifespan=lifespan.lifespan)
-        # ... middleware, error handlers, routers
-
-    def run(self) -> None:
-        config = uvicorn.Config(app=self.app, ..., access_log=False)
-        uvicorn.Server(config).run()
-```
-
-Один FastAPI-app = один `APIWorker` = один YAML-конфиг (`APIWorkerSettings`). Не запускай несколько приложений в одном процессе. Полный код — [api_worker_template.md](references/api_worker_template.md).
-
-## Middleware
-
-Регистрируются через `app.add_middleware(...)`. **Starlette применяет middleware в обратном порядке регистрации:** последний `add_middleware` — самый внешний. Это влияет на то, кто видит что.
-
-### Обязательный набор
-
-| Слой (внутри → наружу) | Middleware | Назначение |
-|---|---|---|
-| 1 (innermost) | `LoggingMiddleware` | Структурный лог запроса+ответа, подбирает `error_context` от error handler |
-| 2 | `PerformanceMiddleware` | Заголовки `x-process-time` / `x-process-time-ms` |
-| 3 | `RequestIDMiddleware` | Сквозной `request_id` в `request.state` + заголовок ответа |
-| 4 (outermost) | `CORSMiddleware` | CORS-политика (см. ниже) |
-
-Порядок в коде:
-
-```python
-app.add_middleware(LoggingMiddleware)
-app.add_middleware(PerformanceMiddleware, ...)
-app.add_middleware(RequestIDMiddleware, ...)
-app.add_middleware(CORSMiddleware, ...)   # последним → outermost
-```
-
-Реализации Logging/Performance/RequestID — в [middlewares_catalog.md](references/middlewares_catalog.md).
-
-### CORS (обязательно)
-
-`CORSMiddleware` обязателен в каждом API-воркере. Без него браузерные клиенты с другого origin режутся.
-
-```python
-from fastapi.middleware.cors import CORSMiddleware
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=self.settings.fastapi.cors.allow_origins,
-    allow_origin_regex=self.settings.fastapi.cors.allow_origin_regex,
-    allow_credentials=self.settings.fastapi.cors.allow_credentials,
-    allow_methods=self.settings.fastapi.cors.allow_methods,
-    allow_headers=self.settings.fastapi.cors.allow_headers,
-    expose_headers=self.settings.fastapi.cors.expose_headers,
-    max_age=self.settings.fastapi.cors.max_age,
-)
-```
-
-- Все параметры читаются из `settings.fastapi.cors.*`. **Хардкод в `server.py` запрещён** — иначе нельзя сузить политику в проде без релиза.
-- Структура `CORSSettings` и валидаторы (запрет `credentials=True` с `*`, проверка regex) поставляются [python-pydantic-settings-config-writing] → секция «FastAPI / Uvicorn» в `references/tech_examples.md`. Если структуры в проекте ещё нет — заведи её, а не подставляй литералы.
-- CORS — outermost: даже на 5xx из downstream-обработчиков ответ должен унести CORS-заголовки, иначе браузер не покажет тело ошибки клиенту.
-
-## Error Handlers
-
-Один файл `error_handler.py`, одна функция `setup_error_handler(app)`. Внутри регистрируются `@app.exception_handler(...)` для базовых иерархий исключений.
-
-```python
-def setup_error_handler(app: FastAPI) -> None:
-    @app.exception_handler(AppError)
-    async def handle_app_error(request: Request, exc: AppError) -> JSONResponse:
-        error_context: dict[str, object] = {
-            "detail": exc.msg, "action": exc.action, ...
-        }
-        if isinstance(exc, AppInternalError):
-            status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-            if exc.wrap_error is not None:
-                error_context["wrap_error"] = str(exc.wrap_error)
-        elif isinstance(exc, AppNotFoundError):
-            status_code = status.HTTP_404_NOT_FOUND
-        else:
-            status_code = status.HTTP_400_BAD_REQUEST
-        request.state.error_context = error_context
-        return JSONResponse(status_code=status_code, content=jsonable_encoder({...}))
-
-    @app.exception_handler(DomainError)
-    async def handle_domain_error(request: Request, exc: DomainError) -> JSONResponse:
-        ...
-```
-
-- Хэндлятся два корня иерархий: `AppError` (`application/errors`) и `DomainError` (`domain/errors`). Конкретные подтипы маппятся на HTTP-коды через `isinstance`.
-- Контекст ошибки кладётся в `request.state.error_context` — `LoggingMiddleware` подбирает и пишет в структурный лог. Без этого ошибки уйдут в логи без бизнес-контекста.
-- Для `AppInternalError` дополнительно кладётся `wrap_error=str(exc.wrap_error)` (если поле не `None`) — это исходное исключение из инфраструктуры. Без него 5xx-логи показывают только user-facing `detail`, и операторы вынуждены поднимать стэки, чтобы понять root cause. Для клиентских подтипов (`AppNotFoundError`, `AppUnauthorizedError`, `DomainError` и т.п.) `wrap_error` **не выставляется** — там нет инфраструктурного контекста, а если бы и был, не должен утечь в общий лог-контракт.
-- Тело ответа: `{"detail": ..., "data": ...}`. `jsonable_encoder` — для безопасной сериализации pydantic-моделей внутри `data`. `wrap_error` уходит **только в лог**, не в тело ответа — иначе клиент увидит трассу инфраструктуры.
-- В error handler **нет** бизнес-логики, обращений в БД, чтения внешних сервисов: только маппинг исключения в HTTP-ответ.
+- Composition root преобразует внешнюю конфигурацию в минимальные параметры,
+  выбирает реализации адаптеров и связывает зависимости.
+- Application factory создаёт FastAPI/ASGI-приложение без I/O и открытия
+  соединений.
+- Lifespan создаёт process-scoped ресурсы и runtime context.
+- Runner запускает приложение, но не определяет его маршруты и зависимости.
 
-Полный код — [api_worker_template.md](references/api_worker_template.md).
+Сохранять существующие имена и структуру проекта. Новые имена вроде
+`create_api_app`, `APIRuntimeContext` и `APIWorker` считать примерами, а не
+обязательным контрактом.
 
-## Lifespan
+Подробный вариант: [фабрика приложения](references/application_factory.md).
 
-Shared-ресурсы (DB-пул, NATS-клиент и т.п.) живут на уровне процесса, не запроса. Инициализируются в lifespan и кладутся в `app.state.*`.
+## Конфигурируемые параметры
 
-```python
-class APILifespan:
-    def __init__(self, settings: APIWorkerSettings) -> None:
-        self._settings = settings
+Все изменяемые между окружениями параметры получать снаружи:
 
-    @asynccontextmanager
-    async def lifespan(self, app: FastAPI) -> AsyncGenerator:
-        manager = PostgresConnectionManager(self._settings.db)
-        await manager.init()
-        app.state.fastapi_settings = self._settings.fastapi
-        app.state.db_connection_manager = manager
-        yield
-        await manager.close()
-```
+- host, port, event loop и параметры graceful shutdown;
+- количество workers или режим reload;
+- root path, OpenAPI и адреса интерфейсов документации;
+- CORS, trusted hosts и proxy trust;
+- включение и параметры middleware;
+- пути health endpoints.
 
-- Класс-обёртка вокруг `@asynccontextmanager` нужен, чтобы передать `settings` через `__init__` (lifespan-функция от FastAPI получает только `FastAPI`-аргумент).
-- Shared-ресурсы инициализируются на startup и кладутся в `app.state.<name>`; на shutdown закрываются в обратном порядке.
-- В `app.state` лежат **shared-ресурсы и settings-блоки** (DB connection manager, NATS-клиент, `fastapi_settings` для извлечения имён заголовков). Per-request объекты (UnitOfWork, текущий пользователь) — через `Depends`, не через `app.state`.
+Не передавать всему presentation общий settings-объект. Преобразовать его в
+неизменяемые типизированные параметры API и runner-а. Не читать env/YAML и не
+создавать module-level settings instance в presentation.
 
-## Routers
+Не передавать `model_dump()` в FastAPI, Uvicorn или middleware. Сопоставлять
+каждый параметр с актуальным аргументом клиента явно.
 
-Один `main_router`, который `APIWorker` подключает целиком; внутри — иерархия подроутеров с префиксами по слоям доступа и версионированием.
+## Фабрика приложения
 
-```python
-# presentation/api/routers/__init__.py
-main_router = APIRouter()
-main_router.include_router(health_router, prefix="/health")
-main_router.include_router(public_router)   # внутри своя структура /public/v1/...
-```
+Фабрика:
 
-```python
-# presentation/api/routers/public/__init__.py
-public_router = APIRouter(prefix="/public", tags=["Public"])
-public_router.include_router(v1_router)
-```
+- принимает параметры API, lifespan factory, routers, error handlers и
+  middleware specifications;
+- возвращает новое приложение при каждом вызове;
+- не открывает соединения и не выполняет сетевые проверки;
+- регистрирует компоненты детерминированно;
+- не импортирует глобальный `main_router` и конкретные адаптеры;
+- пригодна для тестов, import string и Uvicorn factory mode.
 
-```python
-# presentation/api/routers/public/v1/__init__.py
-v1_router = APIRouter(prefix="/v1", tags=["V1"])
-v1_router.include_router(member_router)
-v1_router.include_router(project_router)
-# ...
-```
+Проверять уникальность route names и operation IDs, а также порядок статических
+и параметризованных путей, если это требуется существующей маршрутизацией.
 
-```python
-# presentation/api/routers/public/v1/<aggregate>.py
-<aggregate>_router = APIRouter(prefix="/<aggregates>", tags=["<Aggregate>"])
+## Жизненный цикл и контекст выполнения
 
-@<aggregate>_router.get("")
-async def get_<aggregates>(...): ...
-```
+Использовать один lifespan async context manager. Не смешивать его с
+`startup`/`shutdown` handlers.
 
-- Префиксы фиксируются в подсборщиках рядом с ресурсами (`/public` → `public/__init__.py`, `/v1` → `v1/__init__.py`, `/members` → `member.py`), а не в `main_router`. Так версионирование и группировка живут локально и не требуют правок в `server.py`.
-- `tags=[...]` навешивается на уровне `APIRouter(...)` — попадает в Swagger-секции автоматически.
-- `APIWorker` ничего не знает про конкретные роуты — только про `main_router`. Добавление нового агрегата = `<aggregate>.py` + строка `include_router` в соответствующем `__init__.py`.
+- Создавать обязательные ресурсы до начала приёма запросов.
+- Регистрировать освобождение каждого ресурса в `AsyncExitStack` сразу после
+  успешного создания.
+- При частично неуспешном startup закрывать уже созданные ресурсы.
+- На shutdown освобождать ресурсы в обратном порядке.
+- Не подавлять startup-ошибку или отмену задачи.
+- Не запускать бесконечные background loops внутри API lifespan.
 
-## Dependencies (Depends)
+Хранить в `app.state` один неизменяемый типизированный runtime context. Контекст
+содержит application entry points, readiness state и только разрешённые
+shared-ресурсы через абстрактные контракты. Не помещать туда Unit of Work,
+request-scoped объекты или общий settings.
 
-Per-request DI идёт через `fastapi.Depends`-функции из `presentation/api/dependencies/`. Они:
+Подробности: [lifespan и контекст](references/lifespan_and_context.md).
 
-1. Читают `request.app.state.<resource>` для доступа к shared-ресурсам (без модульных глобалов).
-2. Возвращают **уже готовый объект** для использования в эндпоинте (UnitOfWork, UUID юзера, и т.п.).
-3. Никакой бизнес-логики — только извлечение/проверка из запроса.
+## Промежуточное ПО
 
-### UnitOfWork-провайдер
+Состав middleware брать из требований. Для каждой middleware зафиксировать:
 
-```python
-# presentation/api/dependencies/db.py
-from fastapi import Request
+- какие scope types она обрабатывает;
+- какие данные создаёт и кто их потребляет;
+- видит ли она ответы и исключения downstream;
+- её место во входящем и исходящем пути;
+- безопасный набор логируемых полей.
 
-from infrastructure.db.postgres import PostgresUnitOfWork
+Для собственных сквозных middleware предпочитать pure ASGI. Использовать
+`BaseHTTPMiddleware` только если его ограничения, включая propagation
+`contextvars`, приемлемы.
 
+Middleware должна быть stateless: изменяемое состояние хранить локально на
+вызов, а конфигурацию задавать в `__init__`.
 
-async def db_unit_of_work(request: Request) -> PostgresUnitOfWork:
-    async with request.app.state.db_connection_manager.connection() as conn:
-        return PostgresUnitOfWork(conn)
-```
+CORS подключать только по требованиям. Если CORS должен присутствовать и на
+ответах необработанных ошибок, обернуть им всё приложение. Не заменять отсутствие
+решения разрешающей политикой `*`.
 
-- `db_connection_manager` — shared-ресурс из lifespan. Берётся из `app.state`, не импортируется как модульный глобал.
-- На каждый запрос — свежий `UnitOfWork` с собственным соединением; коммит/роллбэк управляются внутри use case.
+Подробности: [middleware](references/middlewares.md).
 
-### Извлечение пользователя
+## Ошибки и логирование
 
-```python
-# presentation/api/dependencies/user_id_extractor.py
-from uuid import UUID
+Presentation обрабатывает:
 
-from fastapi import HTTPException, Request, status
+- публичные application-ошибки;
+- транспортные ошибки FastAPI/Pydantic;
+- непредвиденные исключения на внешней error boundary.
 
-from infrastructure.config import FastAPISettings
+Не обрабатывать domain-ошибки напрямую. Формат ответа и mapping статусов брать
+из HTTP-требований, а не из полей внутреннего исключения.
 
-
-async def user_id_extractor(request: Request) -> UUID:
-    settings: FastAPISettings = request.app.state.fastapi_settings
-    raw = request.headers.get(settings.user_id_header_name)
-    if raw is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "id пользователя не передан")
-    try:
-        return UUID(raw)
-    except (TypeError, ValueError):
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, "некорректный id пользователя"
-        )
-```
-
-- Имя заголовка читается из `FastAPISettings`, который положен в `app.state.fastapi_settings` на startup; не хардкодится.
-- `HTTPException` — единственное место в `presentation/api/dependencies/`, где разрешено бросать HTTP-ошибки напрямую (auth-проверка — не доменная ошибка).
-
-### Использование в эндпоинте
-
-```python
-@member_router.get("/{member_id}")
-async def get_member(
-    member_id: UUID,
-    user_id: UUID = Depends(user_id_extractor),
-    uow: PostgresUnitOfWork = Depends(db_unit_of_work),
-) -> MemberSimpleResponse: ...
-```
-
-- Порядок: path-параметры → query-параметры → `Depends`-ы.
-- В обработчик попадают только готовые объекты; чтения `request.headers`/`request.app.state` внутри обработчика быть не должно.
-
-## Models
-
-Pydantic-схемы запросов и ответов лежат в `presentation/api/models/`. Это **HTTP-контракт** — отдельный от `application/dto/`. DTO прикладного слоя нельзя возвращать напрямую: HTTP-схема должна меняться независимо от внутреннего DTO.
-
-### Response-схема с конструктором из DTO
-
-```python
-# presentation/api/models/member.py
-from typing import Self
-from uuid import UUID
-
-from pydantic import BaseModel
-
-from application.dto.member import MemberSimpleDTO
-
-
-class MemberSimpleResponse(BaseModel):
-    member_id: UUID
-    tenant_id: UUID
-    status: str
-    state: str
-    version: int
-
-    @classmethod
-    def from_dto(cls, dto: MemberSimpleDTO) -> Self:
-        return cls(
-            member_id=dto.member_id,
-            tenant_id=dto.tenant_id,
-            status=dto.status,
-            state=dto.state,
-            version=dto.version,
-        )
-```
-
-- Конструктор `from_dto` — единственный мост между application-DTO и HTTP-схемой. Эндпоинт зовёт `Response.from_dto(dto)`, не передаёт DTO в JSON-encoder напрямую.
-- `Self` (3.11+) для типа возврата — наследники получают корректный тип.
-
-### Generic-обёртки
-
-Постраничные ответы — generic-обёртка, не отдельный класс на каждый ресурс.
-
-```python
-# presentation/api/models/paginator_result.py
-from typing import Generic, TypeVar
-
-T = TypeVar("T")
-
-
-class LimitOffsetPaginatorResult(BaseModel, Generic[T]):
-    count: int
-    results: list[T]
-    next: str | None = None
-    previous: str | None = None
-
-    @classmethod
-    def create(cls, request, results, total_count, limit, offset) -> Self: ...
-```
-
-`LimitOffsetPaginatorResult[MemberSimpleResponse]` в сигнатуре эндпоинта → Swagger получит конкретный тип `results`.
-
-## Endpoint pattern
-
-Эндпоинт — тонкий клей: `Depends → Query/Command → UseCase(uow).execute(...) → Response.from_dto(dto)`. Никакой бизнес-логики.
-
-```python
-@member_router.get("/{member_id}")
-async def get_member(
-    member_id: UUID,
-    user_id: UUID = Depends(user_id_extractor),
-    uow: PostgresUnitOfWork = Depends(db_unit_of_work),
-) -> MemberSimpleResponse:
-    query = MemberLastVersionQuery(initiator_id=user_id, member_id=member_id)
-    use_case = MemberLastVersionUseCase(uow)
-    dto = await use_case.execute(query)
-    return MemberSimpleResponse.from_dto(dto)
-```
-
-Шаги обработчика, всегда в одном порядке:
-
-1. Собрать `Query`/`Command` из path/query/body + `user_id` из `Depends`.
-2. Инстанцировать `UseCase`, передав `uow` из `Depends`.
-3. `await use_case.execute(...)`.
-4. Конвертировать результат в Response-схему через `from_dto`.
-
-Чего в эндпоинте быть **не должно**:
-
-- Прямых обращений в `infrastructure/` (репозитории, БД-сессии) — только через use case и его UnitOfWork.
-- Логики маппинга DTO → Response помимо вызова `from_dto`.
-- Обработки `AppError`/`DomainError` через `try/except` — это делает `setup_error_handler`.
-
-## Uvicorn
-
-Запуск через `uvicorn.Server(config)` в `APIWorker.run()`:
-
-```python
-def run(self) -> None:
-    config = uvicorn.Config(
-        app=self.app,
-        host=self.settings.uvicorn.host,
-        port=self.settings.uvicorn.port,
-        reload=self.settings.uvicorn.reload,
-        loop=self.settings.uvicorn.loop,
-        workers=self.settings.uvicorn.workers,
-        access_log=False,
-    )
-    uvicorn.Server(config).run()
-```
-
-- `loop=self.settings.uvicorn.loop` — обычно `"uvloop"`; Uvicorn сам поднимает uvloop policy при старте. Если платформа `uvloop` не поддерживает — явный fallback на `"asyncio"`.
-- `access_log=False` — отключаем стандартный access log Uvicorn-а; вся обсервабельность HTTP идёт через `LoggingMiddleware`. Иначе будет дублирование.
-- `reload=True` только локально, в проде — всегда `False`.
-- `workers` обычно > 1 в проде; lifespan и shared-ресурсы внутри каждого воркера — независимые.
-
-## Entrypoint
-
-API-воркер — один из режимов в `src/main.py`:
-
-```python
-mode = getenv("MODE", "api")
-match mode:
-    case "api":
-        api_settings = APIWorkerSettings()
-        apply_db_migrations(api_settings.db)
-        APIWorker(api_settings).run()
-    case "nats_consumer":
-        ...
-```
-
-- `APIWorkerSettings()` сам читает YAML по `CONFIG_FILE` (см. [python-pydantic-settings-config-writing]).
-- Миграции применяются **до** старта app, а не в lifespan: иначе несколько воркеров будут гоняться за блокировкой.
-- В `main.py` не должно быть бизнес-логики и обращений в `presentation/api/...` помимо `APIWorker`.
-
-## Anti-patterns
-
-- **CORS не последний** в цепочке `add_middleware` → не накладывает заголовки на ответы из downstream-обработчиков ошибок; браузер не покажет тело 5xx.
-- **Хардкод CORS-параметров** в `server.py` (например `allow_origins=["*"]` прямо в коде) — нельзя сузить политику без релиза.
-- **Отсутствие `CORSMiddleware`** вообще — браузерные клиенты с другого origin молча блокируются.
-- **Бизнес-логика в `error_handler.py`** (обращения в БД, мутации) — error handler только маппит исключение в HTTP-ответ.
-- **Глобальные shared-ресурсы** мимо `app.state` (модульные глобалы DB-пула, NATS-клиента) — теряем graceful shutdown, тесты не могут подменить.
-- **Per-request объекты (UoW, текущий пользователь) в `app.state`** — `app.state` для процесса, не для запроса. Per-request → `Depends`.
-- **Импорт `infrastructure/` напрямую в эндпоинтах** (репозитории, sessions, клиенты) — только через use case и его `UnitOfWork`.
-- **Возврат application-DTO напрямую** из эндпоинта без обёртки в `<Aggregate>Response` — HTTP-контракт начинает зависеть от структуры DTO.
-- **`try/except AppError` / `try/except DomainError` в эндпоинте** — обработка ошибок централизована в `setup_error_handler`.
-- **Хардкод имён заголовков** (`user-id`, `x-request-id`) в эндпоинтах/middleware — читать из `FastAPISettings` (через `app.state` или `__init__`-аргументы middleware).
-- **Несколько `FastAPI`-app в одном процессе** — один воркер = одно приложение.
-- **Свой access-log** в Uvicorn в дополнение к `LoggingMiddleware` — дублирование, разные форматы.
-- **Применение миграций в lifespan** — гонка между воркерами/инстансами; применяй в entrypoint до старта app.
-- **`reload=True` в проде** — пересоздаёт процесс при изменении файлов; в проде это не нужно и опасно.
-
-## Definition of Done
-
-- `APIWorker` в `src/presentation/api/server.py` собирает `FastAPI(lifespan=...)`, включает middleware/error-handlers/routers и предоставляет `run()`.
-- Зарегистрированы: `LoggingMiddleware` → `PerformanceMiddleware` → `RequestIDMiddleware` → `CORSMiddleware` (последний — outermost).
-- CORS-параметры читаются из `settings.fastapi.cors.*`, не хардкодятся; `CORSSettings` заведён через [python-pydantic-settings-config-writing] (FastAPI / Uvicorn).
-- `setup_error_handler(app)` маппит подтипы `AppError`/`DomainError` на HTTP-коды и кладёт `request.state.error_context`; для `AppInternalError` контекст дополнен полем `wrap_error` (значение из `exc.wrap_error`), которое в тело ответа не попадает.
-- `APILifespan` инициализирует shared-ресурсы на startup и закрывает на shutdown в обратном порядке; всё попадает в `app.state.*`.
-- `main_router` — единственная точка подключения роутов в `APIWorker`; иерархия подроутеров фиксирует префиксы локально (`/public` → `public/__init__.py`, `/v1` → `v1/__init__.py`, `/<aggregates>` → `<aggregate>.py`).
-- Depends-провайдеры в `dependencies/` читают `request.app.state` для shared-ресурсов и не содержат бизнес-логики; имена заголовков берутся из `FastAPISettings`.
-- HTTP-схемы лежат в `models/`, конструируются из application-DTO через `from_dto`; application-DTO наружу не утекают.
-- Эндпоинт — тонкий клей: `Depends → Query/Command → UseCase.execute(...) → Response.from_dto(...)`, без обращений в `infrastructure/` и без `try/except` доменных/прикладных ошибок.
-- `uvicorn.Config` использует `loop="uvloop"` (или явный fallback), `access_log=False`.
-- `main.py` под `MODE=api` соблюдает порядок: settings → миграции → `APIWorker(...).run()`.
-
-## References
-
-- **[api_worker_template.md](references/api_worker_template.md)** — полный эталон `APIWorker`, `APILifespan`, `setup_error_handler`, `routers/__init__.py` и фрагмент `main.py`. Стартовая точка для нового сервиса.
-- **[middlewares_catalog.md](references/middlewares_catalog.md)** — реализации `LoggingMiddleware`, `PerformanceMiddleware`, `RequestIDMiddleware`; таблица «что кладёт в `request.state`»; как добавить новую middleware и куда её ставить в цепочке.
-- Структура CORS-настроек и валидаторы — [python-pydantic-settings-config-writing] → `references/tech_examples.md` (FastAPI / Uvicorn).
+- Не возвращать stack trace, внутреннее исключение и технические детали.
+- Непредвиденное исключение логировать ровно один раз с `exc_info`.
+- Access log не должен повторять stack trace.
+- Ожидаемые ошибки логировать только на предусмотренном уровне.
+- Передавать request ID через logging context.
+- Не логировать authorization, cookies, секреты и произвольные тела.
+
+Подробности: [обработка ошибок](references/error_handling.md).
+
+## Проверки состояния
+
+Добавлять проверки только по требованиям:
+
+- liveness подтверждает работу процесса без вызовов внешних систем;
+- readiness показывает способность принимать трафик после успешного startup;
+- readiness читает дешёвое состояние ресурсов, а не запускает тяжёлую диагностику;
+- ответы не раскрывают адреса зависимостей, пути секретов и исключения.
+
+Подробности: [health checks](references/health_checks.md).
+
+## Запуск Uvicorn
+
+Выбрать один режим:
+
+- готовый объект приложения и программный `uvicorn.Server` — один процесс без
+  reload;
+- import string или application factory — reload либо несколько workers.
+
+Не сочетать готовый объект приложения с параметрами, требующими повторного
+импорта или создания приложения в дочернем процессе. Каждый worker создаёт
+собственные ресурсы через lifespan.
+
+Доверять forwarded headers только от согласованных proxy IPs. `root_path`,
+OpenAPI/docs URLs и proxy trust передавать как явные параметры. Не выводить
+scheme, host или client IP из недоверенных заголовков.
+
+Подробности: [запуск Uvicorn](references/uvicorn_runner.md).
+
+## Плавное завершение
+
+- Прекратить приём новых запросов.
+- Дать активным запросам конфигурируемое время на завершение.
+- После drain закрыть lifespan-ресурсы.
+- Продолжать попытку закрытия остальных ресурсов при ошибке отдельного cleanup.
+- Сделать cleanup идемпотентным, где повторный вызов возможен.
+- Не подавлять cancellation.
+
+## Тестирование
+
+Для wiring-кода не требовать изолированные unit-тесты, если это запрещено
+правилами проекта. Интеграционно проверить:
+
+- успешный и частично неуспешный startup;
+- освобождение ресурсов и обратный порядок shutdown;
+- runtime context;
+- порядок и эффекты заданных middleware;
+- безопасные application и unexpected error responses;
+- отсутствие двойного логирования;
+- liveness/readiness;
+- CORS только при его включении;
+- сборку выбранного режима Uvicorn без открытия production-порта.
+
+## Антипаттерны
+
+- Создание адаптеров внутри presentation по конкретным классам.
+- Передача Unit of Work в endpoint.
+- I/O при импорте или создании FastAPI application.
+- Module-level application с уже открытыми ресурсами.
+- Общий settings в `app.state`.
+- Набор неописанных динамических полей `app.state`.
+- Одновременное использование lifespan и event handlers.
+- Обязательный CORS или разрешающий wildcard без требований.
+- Подавление исключений middleware.
+- Двойное логирование одной ошибки.
+- `BaseHTTPMiddleware` без оценки ограничений.
+- Готовый `app` вместе с reload/multi-worker режимом.
+
+## Критерии готовности
+
+- Фабрика приложения отделена от runner-а и не выполняет I/O.
+- Зависимости поступают из composition root и не нарушают инверсию.
+- Runtime context типизирован и создаётся только в lifespan.
+- Частичный startup и shutdown безопасно освобождают ресурсы.
+- Middleware и их порядок соответствуют требованиям.
+- Ошибки преобразуются безопасно и логируются один раз.
+- Режим Uvicorn совместим со способом передачи приложения.
+- Health, proxy, CORS и OpenAPI не включены неявно.
+- Согласованные проверки проходят.
+
+## Материалы
+
+- [Фабрика приложения](references/application_factory.md)
+- [Жизненный цикл и контекст выполнения](references/lifespan_and_context.md)
+- [Промежуточное ПО](references/middlewares.md)
+- [Обработка ошибок](references/error_handling.md)
+- [Запуск Uvicorn](references/uvicorn_runner.md)
+- [Проверки состояния](references/health_checks.md)
+- [Чеклист](references/checklists.md)
