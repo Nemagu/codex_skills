@@ -1,4 +1,4 @@
 interface:
   display_name: "Python Pydantic Settings"
-  short_description: "Конфигурация Python через pydantic-settings"
-  default_prompt: "Используй $python-pydantic-settings-config-writing для проектирования YAML-конфигурации и file-based secrets."
+  short_description: "Строгая конфигурация сервисов через pydantic"
+  default_prompt: "Используй $python-pydantic-settings-config-writing для реализации строгой конфигурации, источников, секретов и startup-проверок."

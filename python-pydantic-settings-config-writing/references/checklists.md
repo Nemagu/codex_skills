@@ -1,105 +1,68 @@
-# Checklists
+# Чеклисты
 
-Пошаговые чек-листы добавления типовых артефактов слоя `infrastructure/config/`.
+## Новый технологический блок
 
-## Добавление нового concern-блока
+1. Согласовать поля, источники, обязательность, единицы и defaults.
+2. Сверить API установленной клиентской библиотеки.
+3. Создать technology-specific модуль.
+4. Наследовать immutable `ConfigModel`.
+5. Использовать обязательные поля без скрытых defaults.
+6. Вынести I/O в provider/preflight.
+7. Реализовать явный mapping в client kwargs.
+8. Добавить блок только нужным worker settings.
+9. Обновить YAML-пример и тест.
+10. Обновить публичную витрину.
 
-1. Согласуй с пользователем набор полей. Если технология типовая — предложи стандартный набор из `tech_examples.md`.
-2. Создай файл `infrastructure/config/<concern>.py`. Имя файла — snake_case singular (`db.py`, `nats.py`, `redis.py`).
-3. Определи главный блок:
-   ```python
-   from pydantic import BaseModel, Field
+## Новая верхнеуровневая конфигурация воркера
 
+1. Перечислить только реальные зависимости worker-а.
+2. Выбрать плоский файл или `worker/` по размеру структуры.
+3. Наследовать общий top-level `WorkerSettings`.
+4. Объявить обязательные concern-блоки без `default_factory`.
+5. Выбрать и протестировать точный порядок sources.
+6. Создать отдельный `*.example.yaml`.
+7. Загружать config один раз через loader в composition root.
+8. Выполнить preflight до создания runtime-ресурсов.
 
-   class <Concern>Settings(BaseModel):
-       host: str = "localhost"
-       port: int = ...
-       # ... согласованные поля
-   ```
-4. Если есть подразделы (pool, retry policy, и т.п.) — отдельные `<Concern><Part>Settings(BaseModel)`, композируй через `Field(default_factory=...)`.
-5. Если есть секреты — паттерн `<x>_file: str` + `@property <x>` + `@model_validator(mode="after")` (см. `nested_settings.md` → File-based secrets).
-6. Computed values (URL, derived names) — `@property`, не поля.
-7. Обнови `infrastructure/config/__init__.py`: добавь импорты и имена в алфавитный `__all__`.
-8. Если блок используется в существующем воркере — обнови соответствующий `<Worker>WorkerSettings` в `workers.py`, добавь поле `<concern>: <Concern>Settings = Field(default_factory=<Concern>Settings)`.
-9. Обнови YAML-примеры воркеров (`configs/<worker>.example.yaml`), включи новый блок.
+## Файловый секрет
 
-## Добавление нового top-level worker-конфига
+1. Согласовать secret, путь и механизм доставки.
+2. Хранить только `Path` в settings.
+3. Не читать secret в validator/property.
+4. Проверить файл startup preflight-ом.
+5. Прочитать отдельным provider-ом при создании клиента.
+6. Не строить обычную строку DSN с secret.
+7. Проверить отсутствие secret в dump, repr, logs и errors.
+8. Если нужна ротация, согласовать пересоздание клиента.
 
-1. Определи, какие concern-блоки нужны воркеру.
-2. Открой `infrastructure/config/workers.py`.
-3. Добавь класс:
-   ```python
-   class <WorkerKind>WorkerSettings(AppBaseSettings):
-       <concern1>: <Concern1>Settings = Field(default_factory=<Concern1>Settings)
-       <concern2>: <Concern2>Settings = Field(default_factory=<Concern2>Settings)
-       # ... только нужные блоки
-   ```
-4. Обнови `infrastructure/config/__init__.py`: добавь импорт и имя в алфавитный `__all__`.
-5. Создай YAML-пример `configs/<worker_kind>.example.yaml` с наполнением всех полей.
-6. В presentation-слое (точка входа воркера) — инстанцируй `<WorkerKind>WorkerSettings()`. Конструктор сам прочитает YAML по `CONFIG_FILE`.
+## Новый источник
 
-## Добавление нового file-based secret
+1. Обосновать необходимость источника.
+2. Показать таблицу приоритетов относительно существующих.
+3. Добавить его явно в `settings_customise_sources`.
+4. Не включать dotenv в production без требования.
+5. Проверить одно поле, заданное одновременно в нескольких sources.
+6. Проверить пустое и неверно типизированное значение.
+7. Не ослаблять strict YAML-модели ради env-строк.
 
-1. Согласуй с пользователем имя секрета (`password`, `token`, `private_key`) и путь к файлу.
-2. В соответствующем `<concern>.py` добавь:
-   ```python
-   <secret>_file: str = "/run/secrets/<concern>_<secret>"
-   ```
-3. Добавь validator существования файла:
-   ```python
-   from os import path
-   from typing import Self
+## Изменение поля
 
-   from pydantic import model_validator
+1. Определить совместимость и порядок развёртывания.
+2. Обновить все worker settings, examples и manifests.
+3. Не менять единицы под прежним именем.
+4. Добавить временный alias только на согласованный период.
+5. Отклонять одновременное старое и новое имя.
+6. Удалить alias после перехода.
 
+## Проверка
 
-   @model_validator(mode="after")
-   def validate_<secret>_file(self) -> Self:
-       if not path.isfile(self.<secret>_file):
-           raise ValueError(f"<Secret> file not found: {self.<secret>_file}")
-       return self
-   ```
-4. Добавь `@property` для чтения:
-   ```python
-   @property
-   def <secret>(self) -> str:
-       with open(self.<secret>_file, "r", encoding="utf-8") as file:
-           return file.read().strip()
-   ```
-5. Если секрет используется в URL/connection-string — обнови соответствующий `@property`.
-6. **Не** добавляй секрет как отдельное поле в YAML.
-7. Обнови dev/staging/prod конвенцию доставки секрета (mounts, vault, и т.п.) — это вне application-слоя, но в документации проекта.
-
-## Добавление новой технологии в `tech_examples.md`
-
-1. Согласуй финальный набор полей с пользователем.
-2. Открой `references/tech_examples.md`.
-3. Добавь новую секцию `## <Tech name>` (по алфавиту с существующими секциями).
-4. Помести полный код-блок с реалистичными дефолтами (где безопасно — `host="localhost"`, `port=...`).
-5. Если есть pool / sub-blocks — отдельные класс-блоки внутри одного code-fence.
-6. Если есть file-based secret — паттерн полностью.
-7. Computed properties — обязательно, если есть URL / составные имена.
-8. После кода — список «Типичные поля» с краткими аннотациями.
-9. Не добавляй блок в `__init__.py` — `tech_examples.md` это reference, а не часть кодовой базы.
-
-## Добавление нового поля в существующий блок
-
-1. Определи: поле обязательное или опциональное?
-2. Если обязательное и без дефолта — все YAML-конфиги воркеров, использующих этот блок, должны включить поле; обнови `configs/*.yaml` шаблоны.
-3. Если опциональное / с дефолтом — добавь default в коде; YAML может опустить.
-4. Если поле несёт чувствительное значение — применяй file-based secrets паттерн (см. соответствующий чек-лист).
-5. Если поле участвует в derived value — добавь/обнови `@property`.
-6. Обнови документацию воркера.
-
-## Anti-patterns checklist (что не делать при работе с конфигом)
-
-- [ ] Добавил `BaseSettings` во вложенном блоке? → нет, только `BaseModel`.
-- [ ] Положил top-level worker-настройки в `__init__.py`? → нет, только в `workers.py`.
-- [ ] Чтение env-вара для отдельного поля? → нет, всё через YAML по `CONFIG_FILE`.
-- [ ] Plaintext-пароль в YAML? → нет, file-based secret.
-- [ ] Поле `password: str` для секрета? → нет, `<x>_file` + `@property`.
-- [ ] Derived value в поле? → нет, `@property`.
-- [ ] Mutable default напрямую? → нет, `Field(default_factory=...)`.
-- [ ] Добавил `<Concern>` без суффикса `Settings`? → имя класса: `<Concern>Settings`.
-- [ ] Top-level воркер без суффикса `WorkerSettings`? → имя класса: `<WorkerKind>WorkerSettings`.
-- [ ] Переиспользовал секрет через копирование `<x>_file` → `<x>`? → нет, `@property` всегда читает файл, не кеширует.
+- Модели frozen и коллекции immutable.
+- `extra="forbid"` и defaults валидируются.
+- Обязательные секции нельзя пропустить.
+- `CONFIG_FILE` не читается при импорте.
+- Loader не fallback-ится после ошибки.
+- Preflight отделён от structural validation.
+- Settings не создаёт runtime-клиентов.
+- Secrets не сериализуются и не логируются.
+- Каждый example проходит validation.
+- Ошибка startup логируется один раз.
