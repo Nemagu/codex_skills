@@ -1,8 +1,9 @@
-# Commands & Queries
+# Команды и запросы
 
 ## Форма dataclass
 
-Команда и запрос — простые dataclass-ы для пересечения границы слоя в направлении «presentation → application». Это входные данные use case-а.
+Команда и запрос — публичные входы application-операции для любого вызывающего
+адаптера. Реализуй ровно заданный состав без transport context.
 
 ```python
 from dataclasses import dataclass
@@ -28,13 +29,13 @@ class GetTenantLastVersionQuery:
 class ListTenantLastVersionsQuery:
     initiator_id: UUID
     paginator: LimitOffsetPaginator
-    tenant_ids: list[UUID] | None
-    statuses: list[str] | None
-    states: list[str] | None
+    tenant_ids: tuple[UUID, ...] | None
+    statuses: tuple[str, ...] | None
+    states: tuple[str, ...] | None
 ```
 
 **Правила:**
-- `@dataclass(slots=True, frozen=True)` — обязательно.
+- `@dataclass(slots=True, frozen=True)` и глубокая неизменяемость обязательны.
 - Все поля публичные (без `_`).
 - Чистый dataclass без методов поведения. Никаких `__post_init__` для валидации, никаких computed properties, никаких фабрик.
 - Поля либо обязательные, либо `T | None`. Дефолтные значения через `field(default=...)` — допустимо для опциональных, но не как способ «угадать» отсутствующий ввод (лучше явный `None`).
@@ -45,7 +46,7 @@ class ListTenantLastVersionsQuery:
 |---|---|
 | Скалярные примитивы | `UUID`, `int`, `str`, `bool`, `float`, `Decimal`, `bytes` |
 | Дата/время (stdlib) | `datetime`, `date`, `time` |
-| Контейнеры | `list[T]`, `dict[str, T]`, `tuple[T, ...]` |
+| Контейнеры | `tuple[T, ...]`, `frozenset[T]`, вложенные frozen DTO |
 | Опциональные | `T | None` |
 | Application-level DTO | `LimitOffsetPaginator` и другие input-формы из `application/dto/` (без доменных ссылок и без поведения) |
 
@@ -88,11 +89,12 @@ class UpdateTenantCommand:
 | ✓ Разрешено | ✗ Запрещено |
 |---|---|
 | `-> TenantDTO` | `-> Tenant` (domain entity) |
-| `-> tuple[list[TenantDTO], int]` | `-> list[Tenant]` |
+| `-> tuple[tuple[TenantDTO, ...], int]` | `-> tuple[Tenant, ...]` |
 | `-> None` | `-> TenantID` (VO тоже domain) |
 | | `-> User` |
 
-Если presentation нужен только id созданного объекта — он получает его через DTO (`dto.tenant_id`), а не `TenantID` напрямую.
+Если вызывающему адаптеру нужен только ID, верни публичный DTO с этим значением,
+а не domain VO.
 
 ## Контракт `execute` — 0 или 1 аргумент
 
@@ -116,11 +118,11 @@ async def execute(self, command: XxxCommand, extra: SomethingElse) -> ...: ...
 | Аспект | Command | Query |
 |---|---|---|
 | Цель | мутация состояния | чтение состояния |
-| Return type | `DTO` или `None` | `DTO` или `tuple[list[DTO], int]` |
+| Return type | заданный DTO или `None` | заданный DTO; для limit/offset допустим `tuple[tuple[DTO, ...], int]` |
 | Side effects | да: `read.save` / `version.save` / `outbox.save` | нет |
-| Авторизация (user) | `raise_admin` или иное mutating-право | `raise_reader` |
-| Per-aggregate authorization | `.edit(initiator, [primary])` | `.read(initiator, items)` |
-| Расположение | `command/{user,system}/<aggregate>/<action>.py` | `query/{user,system}/<aggregate>/<action>.py` |
+| Авторизация | только заданная контрактом | только заданная контрактом |
+| Доменное полномочие | только заданный domain-вызов | только заданный domain-вызов |
+| Расположение | `command/<business_capability>/.../<action>.py` | `query/<business_capability>/.../<action>.py` |
 | Suffix dataclass | `Command` | `Query` |
 | Verb form | императив (`Create`, `Update`, ...) | `Get` / `List` |
 | Транзакционная граница | один UoW для согласованных изменений | без UoW, если транзакция не нужна |
@@ -153,35 +155,36 @@ from typing import Any
 class ListTenantLastVersionsUseCase(BaseUseCase):
     async def execute(
         self, query: ListTenantLastVersionsQuery
-    ) -> tuple[list[TenantDTO], int]:
-        action = "получение последних версий арендаторов"
+    ) -> tuple[tuple[TenantDTO, ...], int]:
         initiator_id = UserID(query.initiator_id)
         async with self._uow as uow:
-            initiator = await self._initiator(uow, initiator_id, action)
+            initiator = await self._initiator(uow, initiator_id, self.ACTION)
             initiator.raise_reader()
             filtering_data = self._filtering_data(query)
             tenants, count = await uow.tenant_repositories.read.filters(
                 **filtering_data
             )
             TenantPolicyService().read(initiator, tenants)
-            return [
+            return tuple(
                 TenantDTO.from_domain(tenant) for tenant in tenants
-            ], count
+            ), count
 
     def _filtering_data(
         self, query: ListTenantLastVersionsQuery
     ) -> dict[str, Any]:
         filtering_data: dict[str, Any] = dict()
         if query.tenant_ids is not None:
-            filtering_data["tenant_ids"] = [
+            filtering_data["tenant_ids"] = tuple(
                 TenantID(tid) for tid in query.tenant_ids
-            ]
+            )
         if query.statuses is not None:
-            filtering_data["statuses"] = [
+            filtering_data["statuses"] = tuple(
                 TenantStatus.from_str(s) for s in query.statuses
-            ]
+            )
         if query.states is not None:
-            filtering_data["states"] = [State.from_str(s) for s in query.states]
+            filtering_data["states"] = tuple(
+                State.from_str(s) for s in query.states
+            )
         filtering_data["paginator"] = query.paginator
         return filtering_data
 ```

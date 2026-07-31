@@ -1,97 +1,91 @@
 # DTO
 
-## Категории по направлению
+## Категории
 
-Разделяй DTO по роли в процессе, а не по используемой технологии.
-
-| Категория | Направление | Содержимое |
+| Категория | Назначение | Допустимые данные |
 |---|---|---|
-| Command / Query | presentation → application | Входные примитивы и stdlib-типы |
-| Output DTO | application → presentation | Плоские данные без domain-ссылок |
-| Port DTO | application ↔ adapters | Внутренний типизированный контракт; может содержать domain-объекты |
+| Command / Query | Публичный вход application-операции | примитивы, stdlib, application DTO |
+| Публичный DTO | Публичный результат операции | примитивы, stdlib, application DTO |
+| Port DTO | Самодостаточный контракт исходящего порта | также domain-объекты и VO |
 
-Command и Query описаны отдельно в `commands_and_queries.md` и не получают дополнительный суффикс `DTO`.
+Реализуй ровно заданные поля. Не добавляй сведения, которые операция получает
+через порт, transport metadata и поля «на будущее».
 
-## Выходные DTO
+## Глубокая неизменяемость
 
-Оформляй выходной DTO как неизменяемый снимок:
+Каждый DTO оформляй как `@dataclass(slots=True, frozen=True)`. `frozen=True` не
+делает неизменяемыми вложенные `list` и `dict`, поэтому:
+
+- коллекции храни в `tuple` или `frozenset`;
+- структурированные вложения оформляй отдельными frozen DTO;
+- не изменяй входной DTO внутри use case;
+- выходные коллекции возвращай как `tuple`.
+
+Для `limit/offset` с общим количеством используй
+`tuple[tuple[DTO, ...], int]`; пустой результат — `((), 0)`. Другую форму
+пагинации реализуй буквально и не добавляй total без требования.
+
+## Частичное обновление
+
+Если `None` означает явную очистку, отличай его от отсутствующего поля:
 
 ```python
-from dataclasses import dataclass
-from typing import Self
-from uuid import UUID
-
-from domain.user import User
+from enum import Enum, auto
 
 
-@dataclass(slots=True, frozen=True)
-class UserDTO:
-    user_id: UUID
-    external_user_id: int
-    state: str
-    version: int
+class Unset(Enum):
+    VALUE = auto()
 
-    @classmethod
-    def from_domain(cls, user: User) -> Self:
-        return cls(
-            user_id=user.user_id.user_id,
-            external_user_id=user.external_user_id.user_id,
-            state=user.state.value,
-            version=user.version.version,
-        )
+
+UNSET = Unset.VALUE
 ```
 
-Правила:
+Поле имеет тип `T | None | Unset`. Входящий адаптер преобразует отсутствие в
+`UNSET`, явный null — в `None`. Не используй truthiness для различения вариантов.
 
-- Используй только примитивы, stdlib-типы и композицию других выходных DTO, когда она нужна сценарию.
-- Не возвращай domain entity или VO в presentation.
-- Оставляй только `from_*`-фабрики; не добавляй поведение, I/O и сериализацию.
-- Размещай в `application/dto/<aggregate>.py` или `application/dto/<scenario>.py`.
-- Оставляй `application/dto/__init__.py` пустым, если проект не использует публичную витрину DTO.
+## Публичные DTO
+
+- Не используй domain entity и VO, Pydantic-модели и типы адаптеров.
+- Не добавляй HTTP-, NATS- и serialization-поведение.
+- Называй DTO по смыслу результата, а не `OutputDTO`, `ResponseDTO` или слою.
+- Используй `from_domain()` только для устойчивого чистого преобразования.
+- Если представлений несколько, используй уже заданные различимые имена.
 
 ## Port DTO
 
-Port DTO связывает use case с несколькими портами или адаптерами и может сохранять доменную форму данных:
+Port DTO должен содержать минимально достаточный набор данных, чтобы адаптер
+выполнил операцию без дополнительного обращения к агрегату или другому порту.
+Domain-типы допустимы, поскольку адаптер реализует application-порт.
+
+Для сохранения версии предпочитай два неизменяемых контракта:
 
 ```python
-from dataclasses import dataclass
-
-from domain.user import User, UserID
+@dataclass(slots=True, frozen=True)
+class ProjectSnapshotDTO:
+    project_id: ProjectID
+    status: ProjectStatus
+    version: Version
 
 
 @dataclass(slots=True, frozen=True)
-class UserEventDTO:
-    user: User
-    editor_id: UserID | None
-    event: UserEvent
+class ProjectVersionRecordDTO:
+    snapshot: ProjectSnapshotDTO
+    change: ProjectChange
+    editor_id: MemberID | None
 ```
 
-Используй port DTO, когда агрегат, событие и контекст образуют единый контракт для version repository, outbox или publisher. Формируй такой DTO один раз в use case и не реконструируй его независимо в адаптерах.
+Snapshot DTO фиксирует VO и неизменяемые коллекции в конкретной точке и не хранит
+ссылку на изменяемый агрегат. Outbox DTO также самодостаточен для сохранения:
+включай ID, версию, тип изменения, редактора, publication ID и другие заданные
+метаданные. Не включай subject, stream, payload и headers без application-смысла.
 
-Размещение:
-
-- `application/port/dto/<aggregate>.py` — если DTO используют два и более порта/адаптера;
-- рядом с единственным портом — если отдельный пакет не даёт ценности.
-
-Port DTO не является выходом application → presentation. Наличие domain-ссылок внутри него не нарушает границу слоя: infrastructure реализует application-порт и зависит от application/domain.
-
-## Именование
-
-Называй DTO по смыслу содержащихся данных:
-
-- `UserDTO` — основное текущее представление пользователя;
-- `UserVersionDTO` — исторический снимок;
-- `UserEventDTO` — агрегат и контекст события;
-- `ClaimsDTO` — результат самостоятельного сценария.
-
-Не закрепляй обязательные `Simple`, `Detail`, `Full`, `Short` без явной системы парных представлений. Не используй технические имена `OutputDTO`, `PortDTO`, `RequestDTO`, `ResponseDTO`: направление видно из расположения и сигнатуры, а имя должно объяснять содержимое.
-
-Если у сущности несколько одинаково естественных представлений, согласуй схему имён с пользователем до создания новых DTO и применяй её единообразно.
+Размещай переиспользуемые контракты в `application/port/dto/<meaning>.py`, а
+контракт единственного порта — рядом с ним.
 
 ## Запреты
 
-- Domain-типы в выходном DTO для presentation.
-- Pydantic-модели и типы infrastructure/presentation в application DTO.
-- Валидация входа, вычисление бизнес-значений, `to_dict`, `to_json`, `model_dump`.
-- Мутация DTO после создания.
-- Имена, описывающие транспорт или слой вместо смысла данных.
+- Изменяемые коллекции внутри frozen DTO.
+- Domain-типы в публичных Command, Query и result DTO.
+- Transport-валидация, `to_dict`, `to_json`, `model_dump`.
+- DTO, хранящий изменяемый агрегат как снимок нескольких будущих версий.
+- Техническое имя вместо смысла данных.

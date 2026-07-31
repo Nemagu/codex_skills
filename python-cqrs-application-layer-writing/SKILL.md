@@ -1,33 +1,33 @@
 ---
 name: python-cqrs-application-layer-writing
-description: Используй при проектировании или правке прикладного слоя в Python-проекте по гексагональной архитектуре с CQRS. Триггеры — добавление или изменение use case (команды/запроса), DTO, портов (UnitOfWork, EventPublisher, repository interfaces), иерархии прикладных ошибок в `application/`. Не применять для слоёв `domain/`, `infrastructure/`, `presentation/`.
+description: Используй при реализации или правке прикладного слоя в Python-проекте по гексагональной архитектуре с CQRS. Триггеры — добавление или изменение заданного use case, команды, запроса, DTO, порта, UnitOfWork, преобразования ошибок и механизма version/outbox в `application/`. Не применять для определения требований и слоёв `domain/`, `infrastructure/`, `presentation/`.
 ---
 
 # Python CQRS Application Layer Writing
 
 ## Quick Start
 
-1. Определи тип use case: команда (мутирует состояние, возвращает DTO или `None`) или запрос (только чтение, возвращает DTO либо `tuple[list[DTO], int]`).
-2. Определи источник сценария: `user` (вызывается пользователем, требует initiator и проверку прав) или `system` (системный/событийный, без initiator).
-3. Сначала проверь конвенцию имён проекта. По умолчанию предпочитай единственное число: `application/command/...`, `application/query/...`, `application/port/repository/...`. Если проект последовательно использует множественное число, предложи пользователю сохранить его или согласовать отдельное переименование; не смешивай формы автоматически.
-4. Выбери зависимости по сценарию: UoW — для согласованных изменений в нескольких репозиториях, прямой порт — для одного ресурса или stateless-операции. Выноси зависимости в базовый класс только при реальном переиспользовании.
-5. Объяви команду/запрос как `@dataclass(slots=True, frozen=True)` с примитивами (`UUID`, `int`, `str`, `list[...] | None`). Доменные VO в команды/запросы не помещаем.
-6. Тело `execute` начинается с `action: str` (русское описание для контекста ошибок), затем конверсия примитивов в VO (всё, что может упасть и не требует БД — до открытия транзакции), затем `async with self._uow as uow:`.
-7. В user use case первым делом: получить инициатора и проверить его роль. Helper-методы, работающие с репозиториями, принимают `uow` параметром (`__aenter__` UoW может вернуть транзакционно-связанный объект, отличный от `self._uow`).
-8. Загружай агрегаты через `uow.<x>_repositories.read.by_id(...)`. На `None` бросай `AppNotFoundError` (для основного ресурса операции — цели) или `AppInvalidDataError` (для зависимости/контекста). Initiator — всегда `AppInvalidDataError`.
-9. Авторизуй конкретные агрегаты через доменный per-aggregate сервис (если есть в домене). Это дополняет глобальную проверку роли инициатора, проверяя право над *этими* объектами.
-10. Вызови мутатор агрегата (для query — пропусти), затем атомарно сохрани согласованные изменения через `read`, `version` и `outbox`-порты. Не открывай транзакцию, если сценарий не выполняет согласованных изменений.
-11. Разделяй входные Command/Query, выходные DTO для presentation и внутренние port DTO. Называй DTO по смыслу данных (`UserDTO`, `UserVersionDTO`, `UserEventDTO`, `ClaimsDTO`), не по слою-получателю.
-12. Не лови исключения в use case. Адаптер сам преобразует техническую ошибку в application-ошибку, заполняет `action` и сохраняет исходную причину в `wrap_error`.
-13. Запрещено: f-строки в `msg=` ошибок, бизнес-логика в `execute`, импорты из `infrastructure/` или `presentation/`, доменные типы во входных и выходных DTO, обращения к репозиторию вне активного UoW.
+1. Извлеки из задачи точные команды, запросы, входы, результаты, порты, порядок шагов, авторизацию, границы согласованности и публичные исходы. Не дополняй контракт типовыми элементами.
+2. Размести операцию по бизнес-возможности; `user`/`system` используй только при заданном различии.
+3. Объяви Command, Query и публичные DTO как глубоко неизменяемые `@dataclass(slots=True, frozen=True)`: коллекции — `tuple`, вложения — другие неизменяемые DTO.
+4. Для partial update различай `UNSET`, `None` и переданное значение. Не используй truthiness вместо проверки контракта.
+5. Преобразуй вход в domain VO до транзакции, если преобразованию не нужен I/O.
+6. Инжектируй только требуемые порты. UoW используй для заданной атомарной группы; независимый порт передавай напрямую.
+7. Получай ID, время и случайные значения через отдельные порты и передавай ID в доменную фабрику готовым VO.
+8. Реализуй только заданную авторизацию и порядок доменных вызовов. Не добавляй инициатора, роли и policy по шаблону.
+9. Явно преобразуй ожидаемые `DomainError` в публичные application-исходы; неизвестный доменный отказ — в `AppInternalError`.
+10. Техническую ошибку адаптер преобразует в `AppPortError`, а use case — в публичный исход своей операции.
+11. Формируй самодостаточные неизменяемые version/outbox DTO в заданных точках сохранения; не реализуй event sourcing.
+12. Храни в use case только зависимости, а данные вызова — в локальных переменных. Не кешируй результаты в экземпляре.
+13. Не создавай application-сценарии и не вызывай один use case из другого. Реализуй однозначно заданные части без придумывания семантики.
 
 ## When to Apply
 
 ### Триггеры активации
 
 **По расположению файлов** — любая правка/создание в `application/`:
-- `application/command/{user,system}/<aggregate>/<action>.py`
-- `application/query/{user,system}/<aggregate>/<action>.py`
+- `application/command/<business_capability>/{user,system}/<action>.py`
+- `application/query/<business_capability>/{user,system}/<action>.py`
 - `application/command/base.py`, `application/query/base.py`
 - `application/dto/<aggregate>.py`, `application/dto/paginator.py`
 - `application/port/unit_of_work.py`, `application/port/event_publisher.py`
@@ -51,6 +51,7 @@ description: Используй при проектировании или пр�
 - Добавление события в outbox + соответствующий publisher use case.
 - Расширение иерархии прикладных ошибок.
 - Правка списочных запросов (filter helper, paginator).
+- Добавление источника идентификаторов, часов, кеша или другого исходящего порта.
 
 ### Анти-триггеры
 
@@ -58,6 +59,8 @@ description: Используй при проектировании или пр�
 - `domain/` — доменная модель: агрегаты, value objects, фабрики, доменные сервисы, абстрактные domain-интерфейсы.
 - `infrastructure/` — реализации портов: репозитории к БД, адаптеры к брокеру сообщений, миграции схемы БД.
 - `presentation/` — точки входа в систему: HTTP-эндпоинты, фоновые worker-ы, схемы валидации входящих данных.
+- Составные сценарии и pipeline-описания: отдельные классы сценариев в
+  `application/` не создаются, один use case из другого не вызывается.
 
 Также не активируется на косметические правки внутри `application/` (только docstrings, переименование без изменения контракта, импорт-рефакторинг).
 
@@ -73,8 +76,10 @@ description: Используй при проектировании или пр�
 - Гексагональная архитектура с выделенным `application/`-слоем.
 - CQRS: команды и запросы разнесены по разным деревьям.
 - `application/` импортирует только из `domain/` и стандартной библиотеки. Запрещены импорты из `infrastructure/`, `presentation/`. Внешние библиотеки (web-фреймворки, драйверы БД, клиенты брокеров и т.п.) не используются.
-- В проекте есть domain-слой с агрегатами, VO, доменными сервисами и абстрактными domain-репозиториями. При отсутствии или неполноте домена — согласование с пользователем до начала работы.
-- Прикладная авторизация опирается на доменную модель ролей и политик, если она нужна сценарию. HTTP-аутентификацию, извлечение токена и формирование request context по умолчанию оставляй в presentation.
+- Состав и семантика application-операций заданы входными требованиями. Скил
+  выбирает Python-реализацию, но не проектирует новые поля, исходы и шаги.
+- Прикладная авторизация использует только заданные сведения и domain-контракты.
+  Аутентификация и transport context остаются во входящем адаптере.
 
 ## Package Structure
 
@@ -85,59 +90,57 @@ application/
 │
 ├── dto/
 │   ├── __init__.py                          ← пустой
+│   ├── unset.py                             ← UNSET для partial update
 │   ├── paginator.py                         ← LimitOffsetPaginator и общие пагинаторы
-│   └── <aggregate>.py                       ← выходные DTO для presentation
+│   └── <meaning>.py                         ← публичные application DTO
+├── error_mapping/
+│   └── <business_capability>.py             ← переиспользуемые трансляторы
 │
 ├── port/
 │   ├── __init__.py                          ← пустой
 │   ├── unit_of_work.py                      ← UnitOfWork ABC + property на репо-группы
 │   ├── event_publisher.py                   ← EventPublisher ABC + TypeAlias событий
-│   ├── dto/                                 ← внутренние port DTO при 2+ потребителях
-│   │   └── <aggregate>.py
+│   ├── dto/                                 ← самодостаточные port DTO
+│   │   └── <meaning>.py
 │   └── repository/
 │       ├── __init__.py                      ← только re-export + __all__
 │       └── <aggregate>.py                   ← интерфейсы + <Aggregate>Repositories
 │
 ├── command/
 │   ├── __init__.py                          ← пустой
-│   ├── base.py                              ← BaseUseCase + PublisherUseCase (пример конвенции)
-│   ├── user/
-│   │   ├── __init__.py                      ← пустой
-│   │   └── <aggregate>/
-│   │       ├── __init__.py                  ← НЕ пустой: re-export use case-ов агрегата
-│   │       ├── base.py                      ← опционально: общий helper для 2+ use case-ов
-│   │       └── <action>.py                  ← один use case на файл
-│   └── system/
-│       ├── __init__.py                      ← пустой
-│       └── <aggregate>/
-│           ├── __init__.py                  ← НЕ пустой: re-export use case-ов агрегата
+│   ├── base.py                              ← только реально общие helpers
+│   └── <business_capability>/
+│       ├── __init__.py                      ← публичная витрина возможности
+│       ├── user/                            ← только при заданном разделении
+│       │   └── <action>.py
+│       └── system/                          ← только при заданном разделении
 │           └── <action>.py
 │
 └── query/
     ├── __init__.py                          ← пустой
-    ├── base.py                              ← BaseUseCase (без PublisherUseCase)
-    ├── user/
-    │   ├── __init__.py                      ← пустой
-    │   └── <aggregate>/
-    │       ├── __init__.py                  ← НЕ пустой: re-export use case-ов агрегата
-    │       ├── base.py                      ← опционально: общий helper для 2+ use case-ов
-    │       └── <action>.py
-    └── system/                              ← создаётся при наличии системных запросов
-        ├── __init__.py                      ← пустой
-        └── <aggregate>/
-            ├── __init__.py                  ← НЕ пустой: re-export use case-ов агрегата
+    ├── base.py                              ← только реально общие helpers
+    └── <business_capability>/
+        ├── __init__.py                      ← публичная витрина возможности
+        ├── user/
+        │   └── <action>.py
+        └── system/
             └── <action>.py
 ```
+
+Для малого набора операций сохраняй принятую плоскую структуру. Группируй по
+бизнес-возможности при росте: более 12 файлов на уровне, минимум две устойчивые
+группы с двумя операциями, повторяющиеся префиксы, необходимость индекса или
+очевидное скорое достижение этих условий. Не перемещай существующие файлы
+автоматически. Уровень bounded context добавляй только при явно выделенных
+нескольких контекстах и устойчивой группировке возможностей.
 
 ### Назначение узлов
 
 Ветки `user` и `system` одинаково применяются к командам и запросам:
 
-- `user` — операция начинается пользователем экосистемы, содержит
-  `initiator_id` и передаёт проверку прав доменному поведению;
-- `system` — операция начинается внешним событием, планировщиком или внутренним
-  процессом, не содержит пользовательского инициатора и не выполняет
-  пользовательскую авторизацию.
+- `user` и `system` отражают заданный источник операции, но сами по себе не
+  добавляют `initiator_id`, роль или policy. Включай только сведения и проверки
+  конкретного контракта.
 
 Эта классификация не определяет доступность операции через HTTP или брокер и не
 является заменой модификаторам видимости.
@@ -145,17 +148,18 @@ application/
 | Узел | Что внутри | Канон |
 |---|---|---|
 | `error.py` | `AppError` + `AppNotFoundError`, `AppInvalidDataError`, `AppInternalError` | один файл, не дробится |
-| `dto/<aggregate>.py` | Выходные DTO для presentation, названные по смыслу данных | по одному файлу на агрегат или сценарий |
+| `dto/<meaning>.py` | Публичные application DTO, названные по смыслу данных | по связному представлению |
+| `dto/unset.py` | Общий `UNSET` для partial update | один файл |
 | `dto/paginator.py` | общие пагинаторы (`LimitOffsetPaginator`) | один на проект |
 | `port/unit_of_work.py` | `UnitOfWork` ABC: `__aenter__`/`__aexit__` + property на группы | один файл |
 | `port/event_publisher.py` | `EventPublisher` ABC + `TypeAlias` допустимых event DTO | один файл |
-| `port/dto/<aggregate>.py` | Внутренние DTO, общие для нескольких портов/адаптеров | создаётся по необходимости |
+| `port/dto/<meaning>.py` | Самодостаточные внутренние DTO портов | создаётся по необходимости |
 | `port/repository/__init__.py` | Только re-export и алфавитный `__all__` | публичная витрина |
 | `port/repository/<aggregate>.py` | Repository-интерфейсы и `<Aggregate>Repositories` | по одному файлу на агрегат |
 | `command/base.py` / `query/base.py` | базовые классы use case-ов (если приняты в проекте) | пример конвенции, не предписание |
-| `command/{user,system}/<aggregate>/<action>.py` | один use case = один файл: dataclass-команда + use case-класс | каждый файл публичный |
-| `query/{user,system}/<aggregate>/<action>.py` | dataclass-запрос + use case-класс | то же |
-| `command/{user,system}/<aggregate>/base.py` <br> `query/{user,system}/<aggregate>/base.py` | **опционально**: общий helper для 2+ use case-ов одной группы | создаётся, только когда 2+ use case-а делят helper |
+| `command/<business_capability>/.../<action>.py` | один use case = один файл | группировка по бизнес-возможности |
+| `query/<business_capability>/.../<action>.py` | dataclass-запрос + use case-класс | то же |
+| `error_mapping/<business_capability>.py` | Повторяющиеся трансляторы `DomainError` | только при переиспользовании |
 
 ### Конвенции по `__init__.py`
 
@@ -163,14 +167,15 @@ application/
 |---|---|---|
 | `application/__init__.py` | пустой | — |
 | `application/{command,query,dto,port}/__init__.py` | пустой | — |
-| `application/{command,query}/{user,system}/__init__.py` | пустой | — |
-| **`application/command/{user,system}/<aggregate>/__init__.py`** | **не пустой** | re-export всех use case-ов агрегата + Command-dataclasses, объединённый `__all__` |
-| **`application/query/{user,system}/<aggregate>/__init__.py`** | **не пустой** | re-export всех use case-ов агрегата + Query-dataclasses, объединённый `__all__` |
+| `application/{command,query}/<business_capability>/__init__.py` | публичная витрина | операции возможности |
+| **`application/command/<business_capability>/__init__.py`** | **не пустой** | re-export публичных use case и Command возможности |
+| **`application/query/<business_capability>/__init__.py`** | **не пустой** | re-export публичных use case и Query возможности |
 | `application/dto/__init__.py` | пустой | DTO импортируются напрямую из `application.dto.<aggregate>` |
 | `application/port/__init__.py` | пустой | — |
 | **`application/port/repository/__init__.py`** | **не пустой** | только re-export контрактов и алфавитный `__all__` |
 
-Импорты из presentation — через `<aggregate>/__init__.py` витрину: `from application.command.user.tenant import UpdateTenantUseCase, UpdateTenantCommand`. Изнутри одного use case-файла — прямой путь (`from application.command.base import BaseUseCase`).
+Входящие адаптеры импортируют операции через витрину бизнес-возможности.
+Изнутри application используй прямые пути.
 
 ### Naming convention для use case-ов (CQRS verb-first)
 
@@ -196,13 +201,15 @@ application/
 
 Имена файлов следуют столбцу «Файл» — это часть структуры слоя, не имя класса.
 
-Имена событий (`<Aggregate>Event` в `port/repository/<aggregate>.py` или `port/dto/<aggregate>.py`) живут по отдельному правилу: noun + past (`Created`, `Updated`, `Deleted`, `Restored`).
+Тип сохранённого изменения называй по смыслу (`ProjectChange`, `TenantChange`) и
+размещай рядом с version DTO. Это application-метаданные снимка, не доменное
+событие и не transport message.
 
 ### Чего в layout-е нет и почему
 
 - `system` и `user` обозначают источник сценария, а не публичность Python API или транспортную доступность.
 - `query/system/` создавай только при наличии реального системного сценария чтения; пустую ветку заранее не добавляй.
-- Не создавай отдельный `events.py` без нескольких независимых потребителей: держи `<Aggregate>Event` рядом с repository-контрактом или общим event DTO.
+- Не создавай event-sourcing API, `events.py` и коллекцию событий агрегата.
 
 ## Errors Hierarchy
 
@@ -212,10 +219,15 @@ application/
 AppError (msg, action, data)
 ├── AppNotFoundError       — основной ресурс не найден
 ├── AppInvalidDataError    — зависимость/контекст невалиден или отсутствует
-└── AppInternalError       — внутренняя ошибка слоя/инфраструктуры (+ wrap_error)
+├── <PublicOutcomeError>   — различимый публичный исход операции
+├── AppInternalError       — непредусмотренный внутренний исход (+ wrap_error)
+└── AppPortError           — внутренняя ошибка исходящего порта (+ wrap_error)
 ```
 
-Иерархия живёт в одном файле — `application/error.py`. Per-aggregate подклассов **по умолчанию не вводим** — агрегат живёт в `data`, не в имени класса. Расширение иерархии (новые подклассы для специфичных случаев) — по согласованию с пользователем.
+Иерархия живёт в `application/error.py`. Создавай отдельный публичный тип для
+каждого исхода, который вызывающая сторона должна различать. Не создавай разные
+типы для одинаковой публичной семантики. `AppPortError` не пересекает входящую
+границу: use case всегда преобразует его в публичный исход или `AppInternalError`.
 
 ### Базовый класс
 
@@ -256,13 +268,18 @@ class AppInternalError(AppError):
     ) -> None:
         super().__init__(msg, action, data, *args)
         self.wrap_error = wrap_error
+
+
+class AppPortError(AppInternalError):
+    pass
 ```
 
 ### Поля
 
 - **`msg`** — короткое человекочитаемое описание на русском, без переменных. Пример: `"арендатор не существует"`, `"транзакция уже опубликована"`, `"инициатор не существует"`.
 - **`action`** — контекст операции, в которой возникла ошибка. Совпадает с локальной `action` use case-а. Пример: `"обновление арендатора"`, `"удаление транзакции"`, `"получение последних версий категорий"`.
-- **`data`** — структурированный контекст ошибки для логов и API-ответов. Опционально, по умолчанию `{}`.
+- **`data`** — безопасный структурированный application-контекст. Это не готовое
+  тело API-ответа и не transport-контракт.
 - **`wrap_error`** (только `AppInternalError`) — оригинальное исключение, если ошибка оборачивает техническое.
 
 ### Конвенция формирования `data`
@@ -275,7 +292,8 @@ class AppInternalError(AppError):
 | Ошибка с участием нескольких сущностей одного типа | имя во мн. ч.: `"categories"`, `"transactions"` | `list[dict]` |
 | Ошибка отдельного значения / поля | имя поля: `"version"`, `"event"`, `"status"` | примитив или `dict` |
 
-**Внутри блока сущности — поля в snake_case (английские), значения — примитивы для JSON:**
+**Внутри блока сущности — поля в snake_case, значения — примитивы, stdlib-типы
+или неизменяемые application DTO:**
 
 ```python
 # Ошибка одного агрегата
@@ -301,25 +319,23 @@ class AppInternalError(AppError):
 {"version": 0}
 ```
 
-**Правила значений:**
-- `UUID` оставляем как `UUID`-объект, не строкой — сериализатор API сам приведёт.
-- `Decimal` приводим к `str` (`str(amount)`), чтобы избежать потери точности при JSON-сериализации.
-- `datetime` оставляем как есть, сериализатор API приведёт.
-- `Enum` берём `.value` (строку), не сам enum.
-- Доменные VO в значениях не появляются — всегда разворачиваем в примитив (`tenant_id.tenant_id`, `status.value`).
+Не помещай в `data` domain-объекты, VO, технические исключения, stack trace,
+секреты и детали адаптера. Для коллекций используй `tuple`. Исходная причина
+хранится только в `wrap_error`; внешний адаптер сам строит безопасный формат.
 
 ### Выбор типа ошибки
 
-| Условие | Тип |
-|---|---|
-| Ресурс — цель операции (существительное в имени use case-а) | `AppNotFoundError` |
-| Ресурс — зависимость/контекст (упоминается в команде, но не цель) | `AppInvalidDataError` |
-| Initiator (всегда) | `AppInvalidDataError` |
-| Use case создания: цели ещё нет, все загружаемые суть зависимости | `AppInvalidDataError` |
-| List-запрос: пустой список валиден | ничего не бросается |
-| Невалидное внутреннее состояние, impossible-кейс, обёртка тех.исключения | `AppInternalError` |
+Выбирай тип только по публичной семантике заданного исхода. Не определяй его
+механически по цели, зависимости, инициатору или имени use case. Пустой результат,
+отсутствие объекта, конфликт, отказ авторизации и недоступность порта реализуй
+ровно так, как задано операцией.
 
-Цель операции определяется механически: существительное в имени класса use case-а. `UpdateTenantUseCase` → цель = `Tenant` → `tenant_id` даёт NotFound. `AppointUserAdminUseCase` → цель = `User` → `user_id` даёт NotFound. Зависимости (`category_id` в `CreateTransactionUseCase`) → InvalidData.
+Ожидаемые domain-ошибки преобразуй локальным `try/except` вокруг минимального
+доменного вызова. Повторяющуюся карту вынеси в функцию с возвратом `NoReturn`.
+Неизвестный `DomainError` преобразуй в `AppInternalError`. Адаптер преобразует
+ожидаемую ошибку зависимости в `AppPortError`; use case придаёт ей публичный смысл
+и свой `ACTION`. Не перехватывай `BaseException`, `CancelledError` и публичный
+`AppError`; внутренний `AppPortError` является отдельным разрешённым случаем.
 
 ### Правила вызова
 
@@ -330,9 +346,10 @@ class AppInternalError(AppError):
 
 ## Public API of Module
 
-### Что попадает в витрину `<aggregate>/__init__.py`
+### Что попадает в витрину бизнес-возможности
 
-В `application/command/{user,system}/<aggregate>/__init__.py` и `application/query/{user,system}/<aggregate>/__init__.py` re-export-ятся:
+В `application/{command,query}/<business_capability>/__init__.py` re-export-ятся
+публичные use case и соответствующие Command/Query этой возможности.
 
 | Категория | Примеры |
 |---|---|
@@ -343,7 +360,7 @@ class AppInternalError(AppError):
 - Helper-методы из `<aggregate>/base.py` (приватные, внутреннее использование).
 - Базовые классы из `command/base.py` / `query/base.py` — импортируются напрямую.
 
-### Шаблон `<aggregate>/__init__.py`
+### Шаблон витрины бизнес-возможности
 
 ```python
 from application.command.user.tenant.delete import (
@@ -398,15 +415,16 @@ __all__ = [
 
 ### Top-level `application/__init__.py` — пустой
 
-Не делаем re-export на верхний уровень. Импорты на стороне идут через `<aggregate>/__init__.py` витрины (для use case-ов) или прямые пути (для DTO, ошибок, базовых классов).
+Не делай re-export на верхний уровень. Use case импортируй через витрину
+бизнес-возможности, DTO, ошибки и базовые классы — прямыми путями.
 
 ### Правила импорта
 
 | Где | Откуда импортируем |
 |---|---|
-| Из `application/command/<...>/<aggregate>/<action>.py` | Прямые пути: `from application.command.base import BaseUseCase`, `from application.dto.tenant import TenantDTO`, `from application.error import AppNotFoundError`, `from domain.tenant import TenantID, TenantPolicyService` |
-| Из `application/query/<source>/<aggregate>/<action>.py` | Аналогично |
-| Из `presentation/` | Витрина: `from application.command.user.tenant import UpdateTenantUseCase, UpdateTenantCommand` |
+| Из `application/command/<business_capability>/.../<action>.py` | Прямые пути к DTO, ошибкам, портам и domain |
+| Из `application/query/<business_capability>/.../<action>.py` | Аналогично |
+| Из входящего адаптера | Витрина бизнес-возможности |
 | Из `infrastructure/` (для имплементации портов) | Прямые пути: `from application.port.repository.tenant import TenantReadRepository` |
 
 ## Anti-patterns (сводный чеклист)
@@ -426,40 +444,47 @@ __all__ = [
 - UoW в read-only/stateless-сценарии без транзакционной потребности.
 - Helper-метод, работающий с репозиториями, без `uow`-параметра.
 - Хранение `uow` в state объекта.
+- Ручной `commit()`/`rollback()` в use case или подавление исключения в `__aexit__`.
+- Использование репозитория после выхода из UoW.
 
 ### Авторизация
-- Любая пользовательская авторизация в system use case (там нет initiator).
+- Авторизация, initiator или role-check, добавленные только по метке user/system.
 - Загрузка агрегатов **до** проверки роли инициатора.
 - Глобальная проверка роли без последующего per-aggregate authorization-сервиса (для user-команды над конкретным агрегатом).
 - `_initiator` вне `async with` — нужен открытый `uow`.
 
 ### Команды, запросы, DTO
 - Команда/запрос/DTO без `@dataclass(slots=True, frozen=True)`.
+- Изменяемые `list`/`dict` внутри frozen DTO; используй `tuple` и вложенные DTO.
 - Поля команд/запросов: VO, domain entity, response-DTO, типы presentation/infrastructure.
 - Конверсия примитивов в VO внутри команды (`__post_init__` и т.п.) — конверсия в use case.
 - `execute` с двумя+ аргументами — только 0 или 1.
 - DTO с методами поведения (валидации, вычисления) — только `from_*` фабрики.
-- Domain entity/VO во внешнем DTO для presentation.
+- Domain entity/VO в публичном application DTO.
 - `to_dict` / `to_json` / `model_dump` в DTO — сериализация это presentation.
+- Использование `None` одновременно как «не передано» и «очистить»; применяй `UNSET`.
 
 ### Ports
 - Тело в абстрактном методе — должен быть `...`.
 - Реализация в `port/` — реализации в `infrastructure/`.
 - Беспричинное разбиение `port/repository/<aggregate>.py` на мелкие файлы.
-- `<Aggregate>Event` без `from_str`.
 - `<Aggregate>Repositories` с `frozen=True`.
+- `next_id()` в repository-порте; используй отдельный ID provider.
+- Вызов одного и того же порта в цикле вместо требуемого batch-контракта.
 
 ### Ошибки
 - f-строки в `msg`.
 - Позиционные аргументы при создании ошибки.
 - `data={}` явным пустым литералом — параметр опускается.
 - VO/entity в значениях `data` — развёрнуто в примитивы.
-- `try/except AppError` в use case — control flow слоя ловить нельзя.
-- `try/except DomainError` или технической ошибки в use case.
+- Повторное оборачивание публичного `AppError`; `AppPortError` преобразуется отдельно.
+- Пропуск `DomainError` или `AppPortError` во входящий адаптер.
+- Перехват `BaseException` или `asyncio.CancelledError`.
+- Глобальная таблица преобразования всех domain-ошибок без контекста операции.
 - Возврат `AppError | None` из порта вместо успешного результата или исключения.
 - Пустой `action` в ошибке адаптера; адаптер формирует контекст сразу.
 - Прямой `raise AppError(...)` — только подклассы.
-- Per-aggregate подклассы (`TenantNotFoundError` и т.п.) по умолчанию не вводятся.
+- Отсутствие отдельного типа для публично различимого application-исхода.
 - Бизнес-логика в `execute`, минуя domain.
 
 ### Outbox / publisher
@@ -468,8 +493,10 @@ __all__ = [
 - DB-транзакция на время сетевой публикации без согласованного изменения состояния.
 - Отметка `published` до полного успеха batch или частичная отметка при ошибке.
 - Формирование broker payload/subject в application вместо infrastructure-адаптера.
-- `version.save` без предшествующего `read.save` — состояние и аудит идут парой.
-- `outbox.save` у агрегата без `outbox`-поля в `<Aggregate>Repositories`.
+- Точки version/outbox-сохранения, отсутствующие в контракте операции.
+- Передача изменяемого агрегата и отдельных `change`/`editor_id` вместо
+  самодостаточного immutable version DTO.
+- Outbox DTO, которому адаптеру не хватает данных для сохранения записи.
 
 ### Naming и структура
 - Имена use case-ов с `-ion` / `-ing` / agent-noun — только verb-first (`CreateTenant`, `GetTenantLastVersion`).
@@ -478,6 +505,11 @@ __all__ = [
 - Имя файла, не совпадающее с действием.
 - Техническое имя DTO (`OutputDTO`, `PortDTO`, `ResponseDTO`) вместо имени по смыслу данных.
 - Команда/запрос с `<Aggregate><Action>` ordering вместо verb-first.
+- Группировка растущего дерева только по агрегатам или transport-адаптерам.
+- Каталог `application/scenario/` и вызов одного use case из другого.
+- Динамический или дублирующийся `action`; используй `ClassVar[str] ACTION`.
+- Command, Query, агрегат, локальный UoW или результат, сохранённые в `self`.
+- Неявное кеширование результата в use case вместо отдельного cache-порта.
 
 ## References
 
