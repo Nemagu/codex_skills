@@ -120,5 +120,4 @@ FastAPI `Depends(operation_dependency)` регистрируется внутр�
 выбросить централизованную presentation-ошибку для отсутствующего/некорректного
 transport input.
 
-Не логировать ошибку в endpoint: внешняя error boundary отвечает за единичное
-логирование.
+Не логировать ошибку в endpoint, включая вариант catch/log/re-raise.
