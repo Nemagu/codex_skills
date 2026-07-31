@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python FastAPI HTTP Endpoints"
+  short_description: "Реализация HTTP-контрактов на FastAPI"
+  default_prompt: "Используй $python-fastapi-http-endpoint-writing для реализации HTTP endpoint-ов, transport-моделей и явных mappings в application-контракты."
