@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python psycopg + yoyo Persistence"
+  short_description: "PostgreSQL-адаптеры и миграции psycopg/yoyo"
+  default_prompt: "Используй $python-psycopg-yoyo-persistence-writing для реализации PostgreSQL persistence-адаптера или миграции yoyo."

@@ -12,7 +12,7 @@ description: Используй при реализации или правке 
 3. Объяви Command, Query и публичные DTO как глубоко неизменяемые `@dataclass(slots=True, frozen=True)`: коллекции — `tuple`, вложения — другие неизменяемые DTO.
 4. Для partial update различай `UNSET`, `None` и переданное значение. Не используй truthiness вместо проверки контракта.
 5. Преобразуй вход в domain VO до транзакции, если преобразованию не нужен I/O.
-6. Инжектируй только требуемые порты. UoW используй для заданной атомарной группы; независимый порт передавай напрямую.
+6. Инжектируй только требуемые порты. Для заданной атомарной группы используй обязательную фабрику нового UoW; независимый порт передавай напрямую.
 7. Получай ID, время и случайные значения через отдельные порты и передавай ID в доменную фабрику готовым VO.
 8. Реализуй только заданную авторизацию и порядок доменных вызовов. Не добавляй инициатора, роли и policy по шаблону.
 9. Явно преобразуй ожидаемые `DomainError` в публичные application-исходы; неизвестный доменный отказ — в `AppInternalError`.
@@ -98,7 +98,7 @@ application/
 │
 ├── port/
 │   ├── __init__.py                          ← пустой
-│   ├── unit_of_work.py                      ← UnitOfWork ABC + property на репо-группы
+│   ├── unit_of_work.py                      ← UnitOfWork + обязательная UnitOfWorkFactory
 │   ├── event_publisher.py                   ← EventPublisher ABC + TypeAlias событий
 │   ├── dto/                                 ← самодостаточные port DTO
 │   │   └── <meaning>.py
@@ -151,7 +151,7 @@ application/
 | `dto/<meaning>.py` | Публичные application DTO, названные по смыслу данных | по связному представлению |
 | `dto/unset.py` | Общий `UNSET` для partial update | один файл |
 | `dto/paginator.py` | общие пагинаторы (`LimitOffsetPaginator`) | один на проект |
-| `port/unit_of_work.py` | `UnitOfWork` ABC: `__aenter__`/`__aexit__` + property на группы | один файл |
+| `port/unit_of_work.py` | `UnitOfWork` ABC + обязательная фабрика нового экземпляра | один файл |
 | `port/event_publisher.py` | `EventPublisher` ABC + `TypeAlias` допустимых event DTO | один файл |
 | `port/dto/<meaning>.py` | Самодостаточные внутренние DTO портов | создаётся по необходимости |
 | `port/repository/__init__.py` | Только re-export и алфавитный `__all__` | публичная витрина |
@@ -438,8 +438,10 @@ __all__ = [
 - Re-export use case-ов из верхнеуровневых `__init__.py` (только агрегатный уровень).
 
 ### Транзакционные границы
-- Вложенный `async with self._uow` в одном `execute`.
-- Доступ к репозиториям через `self._uow.<...>` вместо локального `uow` после `async with`.
+- Инъекция или хранение экземпляра UoW вместо stateless-фабрики.
+- Фабрика, возвращающая ранее использованный UoW.
+- Вложенный `async with self._uow_factory()` в одном `execute`.
+- Доступ к репозиториям через поле use case вместо локального `uow`.
 - Несколько транзакций для одного набора согласованных изменений.
 - UoW в read-only/stateless-сценарии без транзакционной потребности.
 - Helper-метод, работающий с репозиториями, без `uow`-параметра.
@@ -468,7 +470,7 @@ __all__ = [
 - Тело в абстрактном методе — должен быть `...`.
 - Реализация в `port/` — реализации в `infrastructure/`.
 - Беспричинное разбиение `port/repository/<aggregate>.py` на мелкие файлы.
-- `<Aggregate>Repositories` с `frozen=True`.
+- Изменяемая `<Aggregate>Repositories`; группа должна быть `frozen=True`.
 - `next_id()` в repository-порте; используй отдельный ID provider.
 - Вызов одного и того же порта в цикле вместо требуемого batch-контракта.
 

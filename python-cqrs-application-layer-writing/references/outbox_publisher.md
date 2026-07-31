@@ -36,11 +36,11 @@ class PublishEventsUseCase:
     def __init__(
         self,
         outbox_reader: OutboxReader,
-        uow: UnitOfWork,
+        uow_factory: UnitOfWorkFactory,
         event_publisher: EventPublisher,
     ) -> None:
         self._outbox_reader = outbox_reader
-        self._uow = uow
+        self._uow_factory = uow_factory
         self._event_publisher = event_publisher
 
     async def execute(self) -> None:
@@ -50,7 +50,7 @@ class PublishEventsUseCase:
 
         await self._event_publisher.batch_publish(events)
 
-        async with self._uow as uow:
+        async with self._uow_factory() as uow:
             await uow.event_repository.outbox.mark_as_published(events)
 ```
 

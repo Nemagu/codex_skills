@@ -19,13 +19,13 @@ from abc import ABC
 
 from application.error import AppInvalidDataError
 from application.port.event_publisher import EventPublisher
-from application.port.unit_of_work import UnitOfWork
+from application.port.unit_of_work import UnitOfWork, UnitOfWorkFactory
 from domain.user import User, UserID
 
 
 class BaseUseCase(ABC):
-    def __init__(self, uow: UnitOfWork) -> None:
-        self._uow = uow
+    def __init__(self, uow_factory: UnitOfWorkFactory) -> None:
+        self._uow_factory = uow_factory
 
     async def _initiator(
         self, uow: UnitOfWork, initiator_id: UserID, action: str
@@ -41,16 +41,20 @@ class BaseUseCase(ABC):
 
 
 class PublisherUseCase(BaseUseCase):
-    def __init__(self, uow: UnitOfWork, event_publisher: EventPublisher) -> None:
-        super().__init__(uow)
+    def __init__(
+        self,
+        uow_factory: UnitOfWorkFactory,
+        event_publisher: EventPublisher,
+    ) -> None:
+        super().__init__(uow_factory)
         self._event_publisher = event_publisher
 ```
 
 ```python
 # application/query/base.py — точная копия BaseUseCase, без PublisherUseCase
 class BaseUseCase(ABC):
-    def __init__(self, uow: UnitOfWork) -> None:
-        self._uow = uow
+    def __init__(self, uow_factory: UnitOfWorkFactory) -> None:
+        self._uow_factory = uow_factory
 
     async def _initiator(
         self, uow: UnitOfWork, initiator_id: UserID, action: str
@@ -68,7 +72,7 @@ class BaseUseCase(ABC):
 
 ## Конструктор use case
 
-Use case наследует общий конструктор, если базовый класс оправдан переиспользованием. Иначе принимай нужный UoW или специализированный порт напрямую.
+Use case наследует общий конструктор, если базовый класс оправдан переиспользованием. Иначе принимай обязательную фабрику UoW или специализированный порт напрямую.
 
 ```python
 class UpdateTenantUseCase(BaseUseCase):
@@ -112,11 +116,12 @@ ID, текущее время, случайность и другие недет
   - синхронная валидация формата/диапазона значений, не зависящая от состояния БД;
   - вычисление производных значений из входа.
 - **Границы транзакций** (при наличии согласованных изменений):
-  - **Команда**: один UoW только для заданной атомарной группы.
+  - **Команда**: один новый UoW из обязательной фабрики только для заданной атомарной группы.
   - **Запрос** (чтение): не открывай UoW без транзакционной потребности; для одного источника инжектируй read-порт напрямую.
   - В обоих случаях запрещены **вложенные** блоки.
-- Все обращения к репозиториям — через локальный `uow`, не через `self._uow`. Внутри блока: `uow.<aggregate>_repositories.read.<method>(...)`.
-- Helper-методы, трогающие репозитории (`_initiator`, `_filtering_data`, любой пользовательский), **принимают `uow` параметром** — `__aenter__` UoW может вернуть транзакционно-связанный объект, отличный от `self._uow`.
+- Use case хранит только stateless `UnitOfWorkFactory`; каждый `execute` вызывает её заново.
+- Все обращения к репозиториям — через локальный `uow`, не через поле use case. Внутри блока: `uow.<aggregate>_repositories.read.<method>(...)`.
+- Helper-методы, трогающие репозитории (`_initiator`, `_filtering_data`, любой пользовательский), **принимают `uow` параметром**.
 
 ### Реализовать из входного контракта
 
@@ -137,7 +142,7 @@ async def execute(self, command: UpdateTenantCommand) -> TenantDTO:
     tenant_id = TenantID(command.tenant_id)
     new_status = TenantStatus.from_str(command.status)
     # ──────────────────────────────────────────────────────────
-    async with self._uow as uow:
+    async with self._uow_factory() as uow:
         # ── Phase 2: initiator + role (user only) ─────────────
         initiator = await self._initiator(uow, initiator_id, self.ACTION)
         initiator.raise_admin()
@@ -206,7 +211,7 @@ initiator.raise_reader()  # для запросов: достаточно reader
 Если helper `_initiator` задан и переиспользуется:
 - Загрузка `User` (или эквивалентного агрегата-инициатора) из `uow.<user>_repositories.read.by_id(...)`.
 - Если `None` — заданный публичный application-исход.
-- `uow` параметром обязателен — внутри `__aenter__` UoW может вернуть транзакционно-связанный объект, отличный от `self._uow`.
+- `uow` параметром обязателен — экземпляр существует только внутри текущего блока.
 
 Авторизацию выполняй до защищаемого действия и необязательной загрузки закрытых
 данных, сохраняя точный порядок операции.
@@ -239,6 +244,8 @@ initiator.raise_reader()  # для запросов: достаточно reader
 
 UoW не является универсальной базой use case-а. Не создавай транзакцию, если сценарий не выполняет согласованных изменений.
 
+Use case хранит обязательную `UnitOfWorkFactory`, а не UoW. Фабрика возвращает
+новый экземпляр на каждый транзакционный вызов и новую retry-попытку.
 `__aenter__()` возвращает транзакционно связанный UoW. Успешный выход выполняет
 commit, любое исключение или отмена — rollback. `__aexit__()` не подавляет
 исключение. Use case не вызывает commit/rollback вручную, не переиспользует UoW
@@ -247,12 +254,13 @@ commit, любое исключение или отмена — rollback. `__aex
 ### Правила границ блока
 
 При наличии UoW:
-- Один `execute` команды = **один** `async with self._uow as uow:` блок (атомарность мутаций).
+- Один `execute` команды = **один** `async with self._uow_factory() as uow:` блок (атомарность мутаций).
 - Запрос не открывает UoW без транзакционной потребности; для одного источника использует read-порт напрямую.
 - Запрещены **вложенные** блоки.
-- Все обращения к репозиториям — через локальный `uow`, не через `self._uow`.
+- Все обращения к репозиториям — через локальный `uow`, не через поле use case.
 - Helper-методы, работающие с репо, принимают `uow` параметром.
 - `uow` не сохраняется в state объекта (валиден только в пределах своего блока).
+- Фабрика не должна возвращать ранее использованный экземпляр.
 
 ## Обработка ошибок
 

@@ -37,6 +37,12 @@ class UnitOfWork(ABC):
         traceback: TracebackType | None,
     ) -> None:
         ...
+
+
+class UnitOfWorkFactory(ABC):
+    @abstractmethod
+    def __call__(self) -> UnitOfWork:
+        ...
 ```
 
 Контракт:
@@ -46,7 +52,9 @@ class UnitOfWork(ABC):
 - исключение и отмена задачи выполняют rollback;
 - `__aexit__()` не подавляет исключение;
 - use case не вызывает commit/rollback вручную;
-- один экземпляр используется один раз;
+- `UnitOfWorkFactory` создаёт новый экземпляр для каждого транзакционного вызова;
+- use case хранит фабрику, но не хранит и не переиспользует UoW;
+- один экземпляр UoW используется один раз;
 - репозитории недействительны после выхода;
 - UoW закрывает только принадлежащие ему ресурсы.
 

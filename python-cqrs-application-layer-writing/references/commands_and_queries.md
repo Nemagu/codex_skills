@@ -137,7 +137,7 @@ async def execute(self, command: XxxCommand, extra: SomethingElse) -> ...: ...
 
 ## Выбор зависимостей
 
-- Инжектируй `UnitOfWork`, когда нужны атомарные изменения нескольких репозиториев.
+- Инжектируй `UnitOfWorkFactory`, когда нужны атомарные изменения нескольких репозиториев.
 - Инжектируй специализированный порт напрямую для одного ресурса или stateless-операции.
 - Не открывай UoW в Query без транзакционной потребности.
 - Не вводи базовый use case-класс только ради единственной зависимости; выноси её при реальном переиспользовании.
@@ -157,7 +157,7 @@ class ListTenantLastVersionsUseCase(BaseUseCase):
         self, query: ListTenantLastVersionsQuery
     ) -> tuple[tuple[TenantDTO, ...], int]:
         initiator_id = UserID(query.initiator_id)
-        async with self._uow as uow:
+        async with self._uow_factory() as uow:
             initiator = await self._initiator(uow, initiator_id, self.ACTION)
             initiator.raise_reader()
             filtering_data = self._filtering_data(query)
