@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Periodic Application Worker"
+  short_description: "Периодический вызов application-операций"
+  default_prompt: "Используй $python-periodic-application-worker-writing для реализации периодического вызова application-операции."

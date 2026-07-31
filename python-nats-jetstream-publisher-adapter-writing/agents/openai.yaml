@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python NATS JetStream Publisher Adapter"
+  short_description: "Исходящий publisher-адаптер JetStream"
+  default_prompt: "Используй $python-nats-jetstream-publisher-adapter-writing для реализации исходящего JetStream publisher-адаптера."

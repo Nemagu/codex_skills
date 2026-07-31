@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Background Worker Runtime"
+  short_description: "Общий lifecycle фоновых Python-процессов"
+  default_prompt: "Используй $python-background-worker-runtime-writing для реализации общего runtime фонового процесса."

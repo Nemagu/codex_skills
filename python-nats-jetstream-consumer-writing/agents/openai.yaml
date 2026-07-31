@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python NATS JetStream Consumer"
+  short_description: "Надёжные входящие JetStream consumer-ы"
+  default_prompt: "Используй $python-nats-jetstream-consumer-writing для реализации входящего JetStream consumer."
