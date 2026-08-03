@@ -1,4 +1,4 @@
 interface:
-  display_name: "PostgreSQL Adapter Documentation"
-  short_description: "Документирование PostgreSQL persistence-адаптеров"
-  default_prompt: "Use $postgresql-persistence-adapter-documentation-writing to document a PostgreSQL persistence adapter and its database schema."
+  display_name: "Документация адаптера PostgreSQL"
+  short_description: "Документирование хранилища и схемы PostgreSQL"
+  default_prompt: "Используй $postgresql-persistence-adapter-documentation-writing для документирования адаптера хранения PostgreSQL и его схемы базы данных."
