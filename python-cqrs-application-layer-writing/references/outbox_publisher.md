@@ -84,6 +84,12 @@ class EventPublisher(ABC):
 
 Добавляй только используемые методы. Не расширяй порт агрегатными методами `publish_users`, `publish_tenants`: infrastructure выполняет исчерпывающий dispatch по runtime-типу DTO, выбирает serializer и subject. Неизвестный тип приводит к `AppInternalError`.
 
+Этот `TypeAlias` обязателен и для единого outbox-порта, если он сохраняет или
+возвращает те же конкретные DTO. Не заменяй alias общим базовым DTO, `Any` либо
+перечислением типов ресурсов. Application use case передаёт конкретный DTO между
+outbox и publisher без transport-поведения; адаптеры выполняют dispatch по его
+runtime-типу.
+
 Преобразование DTO в payload, сериализация и выбор subject полностью принадлежат infrastructure. Application только композирует чтение, публикацию и отметку.
 
 ## Batch-семантика
