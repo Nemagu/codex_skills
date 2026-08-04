@@ -95,6 +95,7 @@ class UpdateTenantCommand:
 |---|---|
 | `-> TenantDTO` | `-> Tenant` (domain entity) |
 | `-> tuple[tuple[TenantDTO, ...], int]` | `-> tuple[Tenant, ...]` |
+| `-> PublishResult` | `-> DomainPublishStatus` |
 | `-> None` | `-> TenantID` (VO тоже domain) |
 | | `-> User` |
 
@@ -115,6 +116,10 @@ async def execute(self) -> None: ...
 # ✗ запрещено
 async def execute(self, command: XxxCommand, extra: SomethingElse) -> ...: ...
 ```
+
+Если операция имеет заданное DTO-перечисление ожидаемых результатов, указывай
+его точным return type и возвращай член перечисления. Не заменяй вариант
+«отсутствие работы» возвратом `None` или исключением.
 
 Следствие: вся вариативность входа умещается в полях одного dataclass-а. Если входов «логически два» (например, command + контекст вызова) — оба поля живут внутри одной команды.
 

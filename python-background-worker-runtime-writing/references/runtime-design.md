@@ -12,8 +12,8 @@ class WorkerTaskSpec:
 @dataclass(frozen=True, slots=True)
 class RuntimeOptions:
     process_name: str
-    heartbeat_interval_seconds: float
-    shutdown_timeout_seconds: float
+    shutdown_timeout_ms: int
+    heartbeat_interval_ms: int | None
 ```
 
 `WorkerTask` принимает готовый контекст и `asyncio.Event`. Конкретный тип контекста определяется composition root.
@@ -23,7 +23,9 @@ class RuntimeOptions:
 1. Runner создаёт stop event и устанавливает signal handlers.
 2. `AsyncExitStack` последовательно подготавливает обязательные ресурсы.
 3. Формируется неизменяемый runtime-контекст.
-4. В одном `TaskGroup` запускаются heartbeat и все обязательные задачи.
+4. В одном `TaskGroup` однократно запускаются все обязательные долгоживущие
+   задачи и, если требуется, отдельный периодический heartbeat. Каждая рабочая
+   задача сама выполняет собственный цикл до установки stop event.
 5. Stop event просит задачи закончить работу.
 6. Ошибка задачи отменяет соседние задачи.
 7. После выхода из `TaskGroup` ресурсы закрываются в обратном порядке.
@@ -39,5 +41,10 @@ class RuntimeOptions:
 | Первый сигнал | Установлен stop event, начат graceful shutdown |
 | Повторный сигнал | Выполнена немедленная отмена |
 | Shutdown timeout | Процесс завершён с ненулевым кодом |
-| Heartbeat error | Runtime завершается fail-fast |
+| Ошибка периодического heartbeat | Runtime завершается fail-fast |
+| Progress heartbeat | Обновляется владеющей циклом задачей после заданных исходов |
 | Ожидание интервала | Stop event прерывает ожидание |
+
+Runtime не перебирает task specifications на каждой итерации и не синхронизирует
+расписания независимых задач. Общий цикл сделал бы медленную или ошибочную задачу
+неявной блокировкой для остальных.

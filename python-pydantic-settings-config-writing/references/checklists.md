@@ -18,11 +18,14 @@
 1. Перечислить только реальные зависимости worker-а.
 2. Выбрать плоский файл или `worker/` по размеру структуры.
 3. Наследовать общий top-level `WorkerSettings`.
-4. Объявить обязательные concern-блоки без `default_factory`.
-5. Выбрать и протестировать точный порядок sources.
-6. Создать отдельный `*.example.yaml`.
-7. Загружать config один раз через loader в composition root.
-8. Выполнить preflight до создания runtime-ресурсов.
+4. Отделить общий runtime-блок от блока каждой долгоживущей задачи.
+5. Оставить interval, operation timeout, result delay и progress heartbeat у
+   задачи-владельца; клиентские timeout — у технологического блока.
+6. Объявить обязательные concern-блоки без `default_factory`.
+7. Выбрать и протестировать точный порядок sources.
+8. Создать отдельный `*.example.yaml`.
+9. Загружать config один раз через loader в composition root.
+10. Выполнить preflight до создания runtime-ресурсов.
 
 ## Файловый секрет
 
@@ -63,6 +66,8 @@
 - Loader не fallback-ится после ошибки.
 - Preflight отделён от structural validation.
 - Settings не создаёт runtime-клиентов.
+- Runtime settings не содержит расписания и timeout конкретных задач.
+- Каждая независимая задача имеет собственный блок изменяемых параметров.
 - Secrets не сериализуются и не логируются.
 - Каждый example проходит validation.
 - Ошибка startup пробрасывается с безопасным контекстом и не логируется.
