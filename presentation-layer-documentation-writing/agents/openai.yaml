@@ -1,4 +1,4 @@
 interface:
   display_name: "Документация presentation-слоя"
-  short_description: "HTTP API, внешние модели и входящие контракты"
-  default_prompt: "Используй $presentation-layer-documentation-writing для проектирования документации HTTP API по областям, версиям и ресурсам."
+  short_description: "Координирует внешние контракты по архитектуре"
+  default_prompt: "Спроектируй структуру presentation-документации с помощью -layer-documentation-writing."

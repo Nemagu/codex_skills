@@ -1,0 +1,4 @@
+interface:
+  display_name: "Документация HTTP API"
+  short_description: "Проектирует полные контракты HTTP API"
+  default_prompt: "Подготовь документацию HTTP API с помощью -api-documentation-writing."

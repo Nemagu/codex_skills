@@ -1,0 +1,4 @@
+interface:
+  display_name: "Документация входящих сообщений"
+  short_description: "Проектирует контракты входящих сообщений"
+  default_prompt: "Подготовь контракт входящего сообщения с помощью -consumer-documentation-writing."

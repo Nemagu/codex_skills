@@ -1,0 +1,4 @@
+interface:
+  display_name: "Документация фоновых процессов"
+  short_description: "Проектирует поведение фоновых процессов"
+  default_prompt: "Подготовь документацию фонового процесса с помощью -process-documentation-writing."
