@@ -1,0 +1,4 @@
+interface:
+  display_name: "Service Observability Documentation"
+  short_description: "Документация логирования процессов сервиса"
+  default_prompt: "Используй $service-observability-documentation-writing, чтобы согласовать и описать логирование процессов сервиса."
