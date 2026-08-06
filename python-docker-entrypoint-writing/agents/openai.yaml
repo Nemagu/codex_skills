@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Docker Entrypoint"
+  short_description: "Единый запуск Python-процессов в Docker"
+  default_prompt: "Используй $python-docker-entrypoint-writing, чтобы настроить единый запуск процессов Python-сервиса через Docker ENTRYPOINT."
