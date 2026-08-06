@@ -36,6 +36,9 @@
 
 ## Uvicorn и окружение
 
+- [ ] Новый сервис имеет import-safe `entrypoints/api.py` с `main()`.
+- [ ] `main()` загружает settings, выполняет preflight и вызывает `APIWorker.run()`.
+- [ ] Импорт entrypoint не создаёт ресурсы и не запускает сервер.
 - [ ] Готовый app используется только в single-process режиме.
 - [ ] Reload/workers используют import string или factory.
 - [ ] Аргументы сверены с установленной версией Uvicorn.

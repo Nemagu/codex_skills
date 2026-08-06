@@ -16,6 +16,7 @@
 ```python
 # application/command/base.py
 from abc import ABC
+from typing import ClassVar
 
 from application.error import AppInvalidDataError
 from application.port.event_publisher import EventPublisher
@@ -24,17 +25,19 @@ from domain.user import User, UserID
 
 
 class BaseUseCase(ABC):
+    ACTION: ClassVar[str]
+
     def __init__(self, uow_factory: UnitOfWorkFactory) -> None:
         self._uow_factory = uow_factory
 
-    async def _initiator(
-        self, uow: UnitOfWork, initiator_id: UserID, action: str
+    async def _load_initiator(
+        self, uow: UnitOfWork, initiator_id: UserID
     ) -> User:
         initiator = await uow.user_repositories.read.by_id(initiator_id)
         if initiator is None:
             raise AppInvalidDataError(
                 msg="инициатор не существует",
-                action=action,
+                action=self.ACTION,
                 data={"user": {"user_id": initiator_id.user_id}},
             )
         return initiator
@@ -53,11 +56,13 @@ class PublisherUseCase(BaseUseCase):
 ```python
 # application/query/base.py — точная копия BaseUseCase, без PublisherUseCase
 class BaseUseCase(ABC):
+    ACTION: ClassVar[str]
+
     def __init__(self, uow_factory: UnitOfWorkFactory) -> None:
         self._uow_factory = uow_factory
 
-    async def _initiator(
-        self, uow: UnitOfWork, initiator_id: UserID, action: str
+    async def _load_initiator(
+        self, uow: UnitOfWork, initiator_id: UserID
     ) -> User:
         ...  # та же реализация
 ```
@@ -129,7 +134,27 @@ ID, текущее время, случайность и другие недет
   - В обоих случаях запрещены **вложенные** блоки.
 - Use case хранит только stateless `UnitOfWorkFactory`; каждый `execute` вызывает её заново.
 - Все обращения к репозиториям — через локальный `uow`, не через поле use case. Внутри блока: `uow.<aggregate>_repositories.read.<method>(...)`.
-- Helper-методы, трогающие репозитории (`_initiator`, `_filtering_data`, любой пользовательский), **принимают `uow` параметром**.
+- Helper-методы, трогающие репозитории (`_load_initiator`, `_load_resource`,
+  любой пользовательский), **принимают `uow` параметром**.
+
+### Ответственность helper-методов
+
+`execute` явно вызывает шаги сценария в порядке контракта: преобразование входа,
+загрузку каждого объекта, авторизацию, доменную операцию, создание version DTO и
+сохранение состояния, версии и outbox.
+
+Каждый helper выполняет только одну функцию:
+
+- `_load_initiator` и `_load_<resource>` загружают один объект и преобразуют его
+  отсутствие в заданную application-ошибку;
+- `_authorize_<operation>` только вызывает заданную domain-policy;
+- `_make_version` только создаёт immutable version DTO;
+- чистый filtering helper только преобразует входные фильтры.
+
+Не создавай `_entities`/`_owners`, возвращающие tuple разнородных объектов; не
+передавай флаг `initiator` или callback/policy для переключения поведения. Не
+скрывай в `_save` последовательность state/version/outbox/`mark_persisted` — эти
+точки должны быть видны в `execute`.
 
 ### Реализовать из входного контракта
 
@@ -144,6 +169,7 @@ ID, текущее время, случайность и другие недет
 Пример показывает форму кода, но не добавляет операции типовые шаги.
 
 ```python
+@handle_domain_errors
 async def execute(self, command: UpdateTenantCommand) -> TenantDTO:
     # ── Phase 1: pre-transaction setup ────────────────────────
     initiator_id = UserID(command.initiator_id)
@@ -152,7 +178,7 @@ async def execute(self, command: UpdateTenantCommand) -> TenantDTO:
     # ──────────────────────────────────────────────────────────
     async with self._uow_factory() as uow:
         # ── Phase 2: initiator + role (user only) ─────────────
-        initiator = await self._initiator(uow, initiator_id, self.ACTION)
+        initiator = await self._load_initiator(uow, initiator_id)
         initiator.raise_admin()
 
         # ── Phase 3: load primary ─────────────────────────────
@@ -168,14 +194,7 @@ async def execute(self, command: UpdateTenantCommand) -> TenantDTO:
         TenantPolicyService().edit(initiator, (tenant,))
 
         # ── Phase 5: domain mutation ──────────────────────────
-        try:
-            tenant.new_status(new_status)
-        except DomainError as error:
-            raise_tenant_update_error(
-                error=error,
-                action=self.ACTION,
-                tenant_id=command.tenant_id,
-            )
+        tenant.new_status(new_status)
 
         # ── Phase 6: save ─────────────────────────────────────
         await uow.tenant_repositories.read.save(tenant)
@@ -210,13 +229,13 @@ async def execute(self, command: UpdateTenantCommand) -> TenantDTO:
 Использование:
 
 ```python
-initiator = await self._initiator(uow, UserID(command.initiator_id), action)
+initiator = await self._load_initiator(uow, UserID(command.initiator_id))
 initiator.raise_admin()   # для команд: требуется роль admin
 # или
 initiator.raise_reader()  # для запросов: достаточно reader
 ```
 
-Если helper `_initiator` задан и переиспользуется:
+Если helper `_load_initiator` задан и переиспользуется:
 - Загрузка `User` (или эквивалентного агрегата-инициатора) из `uow.<user>_repositories.read.by_id(...)`.
 - Если `None` — заданный публичный application-исход.
 - `uow` параметром обязателен — экземпляр существует только внутри текущего блока.
@@ -274,9 +293,11 @@ commit, любое исключение или отмена — rollback. `__aex
 
 ### Преобразование
 
-- Перехватывай `DomainError` вокруг минимального доменного вызова.
-- Явно преобразуй ожидаемые типы в заданные публичные application-ошибки.
-- Для повторяющейся карты используй stateless-функцию с возвратом `NoReturn`.
+- Оборачивай весь `execute` явным декоратором application-границы: это покрывает
+  конструирование VO, фабрики, агрегаты и доменные сервисы без локальных блоков.
+- Общая карта содержит только стабильные соответствия; неоднозначные типы вроде
+  `EntityNotFoundError` задавай override-картой конкретного use case.
+- Объявляй `ACTION` как `ClassVar[str]`; декоратор использует его для результата.
 - Неизвестный `DomainError` преобразуй в `AppInternalError` с `wrap_error`.
 - Адаптер преобразует ошибку зависимости в `AppPortError` с операцией порта.
 - Use case преобразует `AppPortError` в публичный исход со своим `ACTION`.
@@ -294,6 +315,7 @@ Use case и UoW не логируют ошибки. Они сохраняют б
 - Перехват `BaseException` или отмены задачи.
 - Логирование ошибок в use case.
 - Логирование обработанной попытки в UoW.
+- Локальные `try/except DomainError` вокруг каждого VO или доменного вызова.
 - Catch-and-ignore доменных ошибок.
 
 ## Аутентификация и авторизация

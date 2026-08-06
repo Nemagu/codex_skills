@@ -120,12 +120,6 @@ class PersonalTransactionType(StrEnum):
     EXPENSE = "expense"
     INCOME = "income"
 
-    def is_expense(self) -> bool:
-        return self == self.__class__.EXPENSE
-
-    def is_income(self) -> bool:
-        return self == self.__class__.INCOME
-
     @classmethod
     def from_str(cls, value: str) -> Self:
         lower_value = value.lower()
@@ -143,14 +137,11 @@ class PersonalTransactionType(StrEnum):
 - Выбирай `StrEnum`, `Enum` или другой enum согласно заданному представлению,
   не ради сериализации во внешнем слое.
 - Значения задавай по принятой конвенции domain, независимо от API и БД.
-- **Предикаты `is_X()`** добавляй только когда они реально используются и делают бизнес-условие понятнее. Не создавай их механически для каждого значения. Использование:
+- Сравнивай enum непосредственно с его членом:
   ```python
-  if transaction_type.is_expense(): ...   # правильно
-  if transaction_type == PersonalTransactionType.EXPENSE: ...   # допустимо, но менее читаемо
+  if transaction_type == PersonalTransactionType.EXPENSE: ...
   ```
 - Добавляй `from_str` только при наличии доменной операции преобразования строки.
-
-**Имя предиката:** `is_<value>()`, всегда без отрицания. Не `is_not_deleted` — пиши `not state.is_deleted()`.
 
 **Чего не делать:**
 - Не добавлять `__post_init__` к enum.
@@ -202,7 +193,7 @@ class MoneyAmount:
 | `domain/value_object.py` | используется ≥ 2 разными агрегатами/проекциями ИЛИ базовыми классами |
 | `domain/<aggregate>/value_object.py` | используется только этим агрегатом |
 
-Общими становятся только VO, у которых нет «домашнего» агрегата (например, `Version`, `AggregateName`, `State`).
+Общими становятся только VO, у которых нет «домашнего» агрегата (например, `Version`, `DomainObjectName`, `State`).
 
 ## Анти-паттерны
 
@@ -213,7 +204,7 @@ class MoneyAmount:
 ❌ **Сравнение enum со строкой в коде:**
 ```python
 if state == "active":  # неправильно
-if state.is_active():  # правильно
+if state == State.ACTIVE:  # правильно
 ```
 
 ❌ **Валидация через ассерты.** `assert version >= 1` — нет, бросаем `ValueObjectInvalidDataError`. Ассерты могут быть выключены через `python -O`.

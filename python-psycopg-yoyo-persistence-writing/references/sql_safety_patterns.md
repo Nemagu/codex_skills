@@ -41,6 +41,28 @@ query = SQL("SELECT id FROM {}.{} WHERE tenant_id = %s").format(
 - Выбирать колонки явно, без `SELECT *`.
 - Выносить фрагмент только при реальном переиспользовании.
 
+## Типы SQL-композиции
+
+- `SQL` использовать для статического SQL-литерала.
+- `Composable` использовать для параметра, принимающего `SQL`, `Identifier`,
+  `Composed` или другой безопасный фрагмент psycopg.
+- `Composed` использовать для результата `SQL.format()`, `SQL.join()` и сложения
+  SQL-фрагментов.
+
+```python
+from psycopg.sql import SQL, Composable, Composed, Identifier
+
+
+def select_query(condition: Composable) -> Composed:
+    return SQL("SELECT id FROM {} WHERE {}").format(
+        Identifier("items"),
+        condition,
+    )
+```
+
+Не аннотировать результат `format()` или `join()` как `SQL`: эти методы
+возвращают `Composed`.
+
 ## Курсоры и типы
 
 - Типизировать async-код через `AsyncConnection[DictRow]` и

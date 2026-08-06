@@ -5,16 +5,19 @@ description: Используй при реализации или правке 
 
 # Python DDD Domain Layer Writing
 
+Общие правила оформления Python-кода брать из `$python-code-style-writing` и не
+дублировать здесь; этот скил определяет только контракты domain-слоя.
+
 ## Quick Start
 
 1. Выдели из задачи точный состав агрегатов, сущностей, проекций, полей, операций, состояний, инвариантов и отказов. Не дополняй его типовыми элементами.
 2. Создай для каждого заданного поля отдельный неизменяемый объект-значение. Внутри доменной модели не используй сырые примитивы.
-3. Создай поддиректорию `domain/<name>/` и последовательно: `value_object.py` → `entity.py` (или `projection.py`) → обязательный `factory.py` → только требуемые `repository.py` и `service.py`.
+3. Создай поддиректорию `domain/<name>/` и последовательно: `value_object.py` → `aggregate.py` (или `projection.py`) → обязательный `factory.py` → только требуемые `repository.py` и `service.py`.
 4. Разреши создание и восстановление агрегата или проекции только через фабрику. `new()` и `restore()` принимают готовые VO; идентификатор всегда передаёт вызывающий слой.
 5. Реализуй только заданные состояния, переходы, инварианты, поведение, семантику повторов и проверки версий.
 6. После всех проверок выполни мутацию агрегата и увеличь версию ровно один раз. При отказе состояние и версия не меняются.
 7. Проекция принимает заданную версию извне и самостоятельно её не увеличивает. Не добавляй ID-parity без явного требования.
-8. Доменные ошибки бросай с kwargs (`msg=`, `subject=`, `data=`); различимые бизнес-отказы представь отдельными типами.
+8. Различимые доменные бизнес-отказы представь отдельными типами.
 9. Не создавай коллекцию доменных событий: тип сохранённого изменения, version storage, outbox и публикация принадлежат внешним слоям.
 10. Обнови витрину `__init__.py` поддиректории.
 11. Внутри `domain/` запрещены импорты из `application/`, `infrastructure/`, `presentation/` и внешних библиотек.
@@ -26,9 +29,9 @@ description: Используй при реализации или правке 
 ### Триггеры активации
 
 **По расположению файлов** — любая правка/создание в `domain/`:
-- `domain/<aggregate>/entity.py`, `domain/<aggregate>/factory.py`, `domain/<aggregate>/service.py`, `domain/<aggregate>/repository.py`, `domain/<aggregate>/value_object.py`
+- `domain/<aggregate>/aggregate.py`, `domain/<aggregate>/factory.py`, `domain/<aggregate>/service.py`, `domain/<aggregate>/repository.py`, `domain/<aggregate>/value_object.py`
 - `domain/<projection>/projection.py` и связанные
-- Общие файлы: `domain/value_object.py`, `domain/error.py`, `domain/entity.py`, `domain/projection.py`
+- Общие файлы: `domain/value_object.py`, `domain/error.py`, `domain/aggregate.py`, `domain/projection.py`
 
 **По концепциям, упомянутым пользователем:**
 - DDD-термины: «агрегат», «aggregate», «value object», «VO», «доменная сущность», «entity», «проекция», «projection», «доменный сервис», «domain service», «фабрика», «factory», «репозиторий-интерфейс».
@@ -65,14 +68,14 @@ description: Используй при реализации или правке 
 domain/
 ├── __init__.py                  ← пустой, не делаем re-export верхнего уровня
 │
-├── value_object.py             ← общие VO (Version, AggregateName, ProjectionName, State)
+├── value_object.py             ← общие VO (Version, DomainObjectName, State)
 ├── error.py                    ← иерархия доменных ошибок
-├── entity.py                  ← базовые Entity / EntityWithState
+├── aggregate.py                  ← базовые AggregateRoot / AggregateRootWithState
 ├── projection.py               ← базовые Projection / ProjectionWithState
 │
 ├── <aggregate_name>/            ← поддиректория на агрегат
 │   ├── __init__.py              ← re-export публичного API через __all__
-│   ├── entity.py
+│   ├── aggregate.py
 │   ├── value_object.py
 │   ├── factory.py
 │   ├── repository.py            ← только для требуемого доменного поиска
@@ -80,7 +83,7 @@ domain/
 │
 └── <projection_name>/           ← поддиректория на проекцию
     ├── __init__.py
-    ├── projection.py            ← вместо entity.py!
+    ├── projection.py            ← вместо aggregate.py!
     ├── value_object.py
     ├── factory.py
     ├── repository.py            ← только для требуемого доменного поиска
@@ -94,7 +97,7 @@ domain/
 **`domain/error.py`** — единая публичная иерархия доменных ошибок, включая
 специализированные типы различимых бизнес-исходов.
 
-**`domain/entity.py`** — базовые `Entity` и `EntityWithState`. Других классов в этом файле быть не должно.
+**`domain/aggregate.py`** — базовые `AggregateRoot` и `AggregateRootWithState`. Других классов в этом файле быть не должно.
 
 **`domain/projection.py`** — базовые `Projection` и `ProjectionWithState`.
 
@@ -115,8 +118,8 @@ domain/
 
 **Разрешено:**
 - Импорт из стандартной библиотеки (`uuid`, `decimal`, `datetime`, `enum`, `dataclasses`, `typing`, `abc`).
-- Импорт между модулями `domain/` (например, `from domain.tenant import TenantID` в `personal_transaction/entity.py`).
-- Импорт из общих файлов (`domain.value_object`, `domain.error`, `domain.entity`, `domain.projection`).
+- Импорт между модулями `domain/` (например, `from domain.tenant import TenantID` в `personal_transaction/aggregate.py`).
+- Импорт из общих файлов (`domain.value_object`, `domain.error`, `domain.aggregate`, `domain.projection`).
 
 **Запрещено:**
 - Импорты из `application/`, `infrastructure/`, `presentation/`.
@@ -218,7 +221,7 @@ class EntityNotFoundError(EntityError):
 ### Поля
 
 - **`msg`** — сообщение об ошибке на языке домена. Пример: `"новое состояние идентично текущему"`, `"арендатор удален"`, `"только владелец может работать с категорией"`.
-- **`subject`** — человекочитаемая метка предмета ошибки на языке домена. Это **не** имя класса/модуля, а название агрегата/VO/проекции в терминах бизнеса. Берётся из `aggregate_name.name` для агрегата, `projection_name.name` для проекции, явная строка для VO. Примеры: `"арендатор"`, `"категория транзакций"`, `"проекция пользователя"`, `"название категории"`, `"версия агрегата"`.
+- **`subject`** — человекочитаемая метка предмета ошибки на языке домена. Это **не** имя класса/модуля, а название агрегата/VO/проекции в терминах бизнеса. Для агрегатов и проекций берётся из общего `domain_object_name.name`, для остальных VO задаётся явно. Примеры: `"арендатор"`, `"категория транзакций"`, `"проекция пользователя"`, `"название категории"`, `"версия агрегата"`.
 - **`data`** — безопасный структурированный контекст ошибки для вызывающего слоя.
   Опционально, по умолчанию `{}`. Domain не логирует ошибки и не определяет их
   transport-представление.
@@ -280,9 +283,8 @@ class EntityNotFoundError(EntityError):
 
 ### Правила вызова
 
-- **Всегда через kwargs.** `raise EntityIdempotentError(msg="...", subject="...", data={...})`.
 - **`data` пропускаем, если её нет** — не передавать `data={}` явно.
-- **В агрегатах используем `_error_data` хелпер** — он подставляет `subject` из `aggregate_name.name` и добавляет ID агрегата в `data`: `raise EntityIdempotentError(**self._error_data(msg="...", data={...}))`.
+- **В агрегатах используем `_error_data` хелпер** — он подставляет `subject` из `domain_object_name.name` и добавляет ID агрегата в `data`: `raise EntityIdempotentError(**self._error_data(msg="...", data={...}))`.
 - **В VO и в сервисах** заполняем поля явно (хелпера нет).
 
 ## Public API of a Module (`__init__.py` and `__all__`)
@@ -299,7 +301,7 @@ class EntityNotFoundError(EntityError):
 
 **Не попадает:**
 - Приватные хелперы (имя с `_`).
-- Базовые классы из общих файлов (`Entity`, `Projection`, `DomainError`) — импортируются напрямую.
+- Базовые классы из общих файлов (`AggregateRoot`, `Projection`, `DomainError`) — импортируются напрямую.
 
 ### Шаблон `__init__.py`
 
@@ -338,12 +340,12 @@ __all__ = [
 | Внутри `domain/<aggregate>/*.py` (тот же модуль) | Прямые пути: `from domain.<aggregate>.entity import ...` |
 | Из `domain/<other_aggregate>/*.py` | Витрина: `from domain.<other_aggregate> import ...` |
 | Из `application/`, `infrastructure/`, `presentation/` | Витрина: `from domain.<aggregate> import ...` |
-| Общие файлы (`domain/entity.py`, `domain/error.py`, ...) | Прямые пути: `from domain.error import ...` |
+| Общие файлы (`domain/aggregate.py`, `domain/error.py`, ...) | Прямые пути: `from domain.error import ...` |
 
 ## References
 
 - **`references/value_objects.md`** — три типа VO (Identity, Validated, Enum) + Multi-field, правила иммутабельности, нормализация, валидация.
-- **`references/aggregates.md`** — базовые классы `Entity` / `EntityWithState`, паттерны агрегатов, фабрики агрегатов, особый случай расширенного состояния.
+- **`references/aggregates.md`** — базовые классы `AggregateRoot` / `AggregateRootWithState`, паттерны агрегатов, фабрики агрегатов, особый случай расширенного состояния.
 - **`references/projections.md`** — базовые классы `Projection` /
   `ProjectionWithState`, операции, фабрики и правила входящей версии.
 - **`references/services_and_repositories.md`** — сервисы конкретных бизнес-правил и необходимые им repository-интерфейсы.

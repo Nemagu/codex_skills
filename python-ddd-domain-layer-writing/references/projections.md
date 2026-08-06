@@ -9,7 +9,7 @@ transport-модели или application DTO в VO выполняется до 
 
 ## Принципиальные отличия от агрегата
 
-| Аспект | Агрегат (`Entity`) | Проекция (`Projection`) |
+| Аспект | Агрегат (`AggregateRoot`) | Проекция (`Projection`) |
 |---|---|---|
 | Источник правды | Сам, в текущем BC | Внешний BC |
 | Версия | Инкрементит сам через `_update_version` | Получает в `new_version(version)` извне |
@@ -18,8 +18,8 @@ transport-модели или application DTO в VO выполняется до 
 | State-методы | `_update_version()` после мутации | Версию **не** трогают |
 | `_check_state` | Применяется для заданных ограничений состояния | Только если такое ограничение задано |
 | Откат версии назад | Невозможен | Защищён `EntityVersionError` |
-| `_error_data` контракт | `subject = aggregate_name.name` | `subject = projection_name.name` |
-| Имя метки | `AggregateName` | `ProjectionName` |
+| `_error_data` контракт | `subject = domain_object_name.name` | `subject = domain_object_name.name` |
+| Имя метки | Общий `DomainObjectName` | Общий `DomainObjectName` |
 
 ## Базовые классы `Projection` и `ProjectionWithState`
 
@@ -33,25 +33,25 @@ from domain.error import (
     EntityIdempotentError,
     EntityVersionError,
 )
-from domain.value_object import ProjectionName, State, Version
+from domain.value_object import DomainObjectName, State, Version
 
 
 class Projection(ABC):
     def __init__(
         self,
         version: Version,
-        projection_name: ProjectionName,
+        domain_object_name: DomainObjectName,
     ) -> None:
         self._version = version
-        self._projection_name = projection_name
+        self._domain_object_name = domain_object_name
 
     @property
     def version(self) -> Version:
         return self._version
 
     @property
-    def projection_name(self) -> ProjectionName:
-        return self._projection_name
+    def domain_object_name(self) -> DomainObjectName:
+        return self._domain_object_name
 
     def new_version(self, version: Version) -> None:
         if self._version == version:
@@ -90,9 +90,9 @@ class ProjectionWithState(Projection):
         self,
         state: State,
         version: Version,
-        projection_name: ProjectionName,
+        domain_object_name: DomainObjectName,
     ) -> None:
-        super().__init__(version=version, projection_name=projection_name)
+        super().__init__(version=version, domain_object_name=domain_object_name)
         self._state = state
 
     @property
@@ -110,20 +110,20 @@ class ProjectionWithState(Projection):
         self._state = state
 
     def activate(self) -> None:
-        if self._state.is_active():
+        if self._state == State.ACTIVE:
             raise EntityIdempotentError(
                 **self._error_data(
-                    msg=f"{self._projection_name.name} уже активно",
+                    msg=f"{self._domain_object_name.name} уже активно",
                     data={"state": self._state.value},
                 )
             )
         self._state = State.ACTIVE
 
     def delete(self) -> None:
-        if self._state.is_deleted():
+        if self._state == State.DELETED:
             raise EntityIdempotentError(
                 **self._error_data(
-                    msg=f"{self._projection_name.name} уже удалено",
+                    msg=f"{self._domain_object_name.name} уже удалено",
                     data={"state": self._state.value},
                 )
             )
@@ -163,7 +163,7 @@ class ProjectionWithState(Projection):
 
 ### Структура файла
 
-- Один класс на файл — `domain/<projection_name>/projection.py` (**не `entity.py`** — имя файла сигнализирует о роли).
+- Один класс на файл — `domain/<projection_name>/projection.py` (**не `aggregate.py`** — имя файла сигнализирует о роли).
 - Класс наследует `ProjectionWithState` (стандартное двухсостояние) или `Projection` напрямую (расширенное состояние).
 - Имя класса — существительное в единственном числе, без суффикса `Projection` (`User`, не `UserProjection`).
 
@@ -180,12 +180,12 @@ class User(ProjectionWithState):
         super().__init__(
             state=state,
             version=version,
-            projection_name=ProjectionName("проекция пользователя"),
+            domain_object_name=DomainObjectName("проекция пользователя"),
         )
         self._user_id = user_id
 ```
 
-Принципы те же, что для агрегата: только VO в параметрах, приватные поля с `_`, `super().__init__` первым шагом. Отличие — передаём `projection_name`, не `aggregate_name`.
+Принципы те же, что для агрегата: только VO в параметрах, приватные поля с `_`, `super().__init__` первым шагом. Обе базовые модели используют общий `DomainObjectName` через параметр `domain_object_name`.
 
 ### Properties
 
@@ -248,12 +248,12 @@ def _error_data(
     data["user_id"] = self._user_id.user_id
     return {
         "msg": msg,
-        "subject": self._projection_name.name,
+        "subject": self._domain_object_name.name,
         "data": {"user": data},
     }
 ```
 
-Конвенция формирования `data` — общая (английский ключ-сущность на верхнем уровне, snake_case полей, примитивы внутри). Отличие — `subject` берётся из `projection_name`, не `aggregate_name`.
+Конвенция формирования `data` — общая (английский ключ-сущность на верхнем уровне, snake_case полей, примитивы внутри). `subject` берётся из общего `domain_object_name`.
 
 ## Особый случай — расширенное состояние
 
@@ -275,7 +275,7 @@ class User(Projection):
     ) -> None:
         super().__init__(
             version=version,
-            projection_name=ProjectionName("проекция пользователя"),
+            domain_object_name=DomainObjectName("проекция пользователя"),
         )
         self._user_id = user_id
         self._state = state
@@ -307,7 +307,7 @@ class User(Projection):
         data["user_id"] = self._user_id.user_id
         return {
             "msg": msg,
-            "subject": self._projection_name.name,
+            "subject": self._domain_object_name.name,
             "data": {"user": data},
         }
 ```
@@ -375,7 +375,7 @@ Raw-данные преобразуются до вызова фабрики. П
 
 ## Анти-паттерны
 
-❌ **Использование `entity.py` как имени файла.** Только `projection.py` — это сигнал читателю о роли класса.
+❌ **Использование `aggregate.py` как имени файла.** Только `projection.py` — это сигнал читателю о роли класса.
 
 ❌ **`_update_version` в state-методе проекции.** Локальный счётчик разойдётся с источником правды.
 

@@ -25,13 +25,13 @@ UoW. Не скрывай один вызов внутри реализации �
 
 ## Publisher use case
 
-Реализуй заданный процесс. Распространённый вариант:
+Реализуй заданный процесс. Вариант для одного следующего события:
 
 ```text
-прочитать неопубликованный batch без транзакции
-→ опубликовать весь batch
-→ при полном успехе открыть короткий UoW
-→ отметить весь batch опубликованным
+прочитать одно следующее событие без транзакции
+→ опубликовать событие
+→ при успехе открыть короткий UoW
+→ отметить событие опубликованным
 → commit
 ```
 
@@ -50,14 +50,14 @@ class PublishEventsUseCase:
         self._event_publisher = event_publisher
 
     async def execute(self) -> None:
-        events = await self._outbox_reader.not_published()
-        if not events:
+        event = await self._outbox_reader.next()
+        if event is None:
             return
 
-        await self._event_publisher.batch_publish(events)
+        await self._event_publisher.publish(event)
 
         async with self._uow_factory() as uow:
-            await uow.event_repository.outbox.mark_as_published(events)
+            await uow.event_repository.outbox.mark_as_published(event)
 ```
 
 Имена портов и repository-групп зависят от проекта; универсальны границы процесса.
@@ -80,15 +80,13 @@ PublishEventDTO: TypeAlias = UserEventDTO | TenantEventDTO | ProjectEventDTO
 class EventPublisher(ABC):
     @abstractmethod
     async def publish(self, event: PublishEventDTO) -> None: ...
-
-    @abstractmethod
-    async def batch_publish(
-        self,
-        events: tuple[PublishEventDTO, ...],
-    ) -> None: ...
 ```
 
-Добавляй только используемые методы. Не расширяй порт агрегатными методами `publish_users`, `publish_tenants`: infrastructure выполняет исчерпывающий dispatch по runtime-типу DTO, выбирает serializer и subject. Неизвестный тип приводит к `AppInternalError`.
+Добавляй только используемые методы. Пакетный метод появляется лишь при
+фактическом пакетном application-сценарии, а не для удобства адаптера или тестов.
+Не расширяй порт агрегатными методами `publish_users`, `publish_tenants`:
+infrastructure выполняет исчерпывающий dispatch по runtime-типу DTO, выбирает
+serializer и subject. Неизвестный тип приводит к `AppInternalError`.
 
 Этот `TypeAlias` обязателен и для единого outbox-порта, если он сохраняет или
 возвращает те же конкретные DTO. Не заменяй alias общим базовым DTO, `Any` либо

@@ -1,6 +1,6 @@
 # Aggregates
 
-## Базовые классы `Entity` и `EntityWithState`
+## Базовые классы `AggregateRoot` и `AggregateRootWithState`
 
 ### Назначение
 
@@ -10,7 +10,7 @@
 - Отладочное представление (`__repr__`).
 - Стандартный набор методов состояния для агрегатов с двумя состояниями (`activate` / `delete` / `new_state` / `_check_state`).
 
-Живут в `domain/entity.py`. Других классов в этом файле быть не должно.
+Живут в `domain/aggregate.py`. Других классов в этом файле быть не должно.
 
 ### Реализация
 
@@ -19,18 +19,18 @@ from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 
 from domain.error import EntityIdempotentError, EntityInvalidDataError
-from domain.value_object import AggregateName, State, Version
+from domain.value_object import DomainObjectName, State, Version
 
 
-class Entity(ABC):
+class AggregateRoot(ABC):
     def __init__(
         self,
         version: Version,
-        aggregate_name: AggregateName,
+        domain_object_name: DomainObjectName,
     ) -> None:
         self._version = version
         self._original_version = version
-        self._aggregate_name = aggregate_name
+        self._domain_object_name = domain_object_name
 
     @property
     def version(self) -> Version:
@@ -41,8 +41,8 @@ class Entity(ABC):
         return self._original_version
 
     @property
-    def aggregate_name(self) -> AggregateName:
-        return self._aggregate_name
+    def domain_object_name(self) -> DomainObjectName:
+        return self._domain_object_name
 
     def mark_persisted(self) -> None:
         self._original_version = self._version
@@ -63,16 +63,16 @@ class Entity(ABC):
         return f"{self.__class__.__name__}({fields})"
 
 
-class EntityWithState(Entity):
+class AggregateRootWithState(AggregateRoot):
     _DELETED_MSG: ClassVar[str] = "сущность удалена, операция запрещена"
 
     def __init__(
         self,
         state: State,
         version: Version,
-        aggregate_name: AggregateName,
+        domain_object_name: DomainObjectName,
     ) -> None:
-        super().__init__(version=version, aggregate_name=aggregate_name)
+        super().__init__(version=version, domain_object_name=domain_object_name)
         self._state = state
 
     @property
@@ -91,10 +91,10 @@ class EntityWithState(Entity):
         self._update_version()
 
     def activate(self) -> None:
-        if self._state.is_active():
+        if self._state == State.ACTIVE:
             raise EntityIdempotentError(
                 **self._error_data(
-                    msg=f"{self._aggregate_name.name} уже активно",
+                    msg=f"{self._domain_object_name.name} уже активно",
                     data={"state": self._state.value},
                 )
             )
@@ -102,10 +102,10 @@ class EntityWithState(Entity):
         self._update_version()
 
     def delete(self) -> None:
-        if self._state.is_deleted():
+        if self._state == State.DELETED:
             raise EntityIdempotentError(
                 **self._error_data(
-                    msg=f"{self._aggregate_name.name} уже удалено",
+                    msg=f"{self._domain_object_name.name} уже удалено",
                     data={"state": self._state.value},
                 )
             )
@@ -113,7 +113,7 @@ class EntityWithState(Entity):
         self._update_version()
 
     def _check_state(self, data: dict[str, Any] | None = None) -> None:
-        if self._state.is_deleted():
+        if self._state == State.DELETED:
             data = data or {}
             data["state"] = self._state.value
             raise EntityInvalidDataError(**self._error_data(self._DELETED_MSG, data))
@@ -142,7 +142,7 @@ mark_persisted()         →  version=2, original_version=2   (синхрони�
 Метод абстрактный — каждый агрегат реализует его, описывая свой ID и ключ верхнего уровня в `data`. Возвращает `dict`, который раскрывается в kwargs доменной ошибки.
 
 ```python
-class PersonalTransaction(EntityWithState):
+class PersonalTransaction(AggregateRootWithState):
     def _error_data(
         self,
         msg: str,
@@ -152,7 +152,7 @@ class PersonalTransaction(EntityWithState):
         data["transaction_id"] = self._transaction_id.transaction_id
         return {
             "msg": msg,
-            "subject": self._aggregate_name.name,
+            "subject": self._domain_object_name.name,
             "data": {"transaction": data},
         }
 ```
@@ -162,7 +162,7 @@ class PersonalTransaction(EntityWithState):
 - Явно обращается к ID property агрегата; не получает имя поля через строки и `getattr`.
 - ID в виде сырого `UUID` (не `<Aggregate>ID`-VO) — `data` идёт в JSON-сериализацию.
 - Ключ верхнего уровня `data` — английское имя агрегата в единственном числе (`transaction`, `category`, `tenant`).
-- `subject` = `self._aggregate_name.name` — на языке домена.
+- `subject` = `self._domain_object_name.name` — на языке домена.
 
 ### `__repr__` через `vars(self)`
 
@@ -170,10 +170,10 @@ class PersonalTransaction(EntityWithState):
 
 ### Паттерн `_check_state` через `_DELETED_MSG`
 
-`EntityWithState._check_state(data)` проверяет только `is_deleted` — это самый частый guard для мутирующих методов. Сообщение per-aggregate декларируется через приватный `ClassVar`:
+`AggregateRootWithState._check_state(data)` проверяет только `is_deleted` — это самый частый guard для мутирующих методов. Сообщение per-aggregate декларируется через приватный `ClassVar`:
 
 ```python
-class PersonalTransaction(EntityWithState):
+class PersonalTransaction(AggregateRootWithState):
     _DELETED_MSG: ClassVar[str] = "транзакция была удалена, ее редактирование запрещено"
 ```
 
@@ -182,7 +182,7 @@ class PersonalTransaction(EntityWithState):
 - Сообщение — данные, не поведение; читается как поле, а не как метод.
 - Не требует знаний `super()`-цепочки в подклассе.
 
-### Стандартные методы `EntityWithState`
+### Стандартные методы `AggregateRootWithState`
 
 | Метод | Что делает | Когда использовать в use case |
 |---|---|---|
@@ -197,9 +197,9 @@ class PersonalTransaction(EntityWithState):
 
 ### Структура файла и класса
 
-- Один агрегат на файл — `domain/<aggregate_name>/entity.py`.
+- Один агрегат на файл — `domain/<aggregate_name>/aggregate.py`.
 - Файл содержит **только** класс агрегата и нужные импорты. Никаких free-functions, helpers, фабрик в этом же файле.
-- Класс наследуется от `EntityWithState` (для двух стандартных состояний) либо от `Entity` напрямую (для расширенного state).
+- Класс наследуется от `AggregateRootWithState` (для двух стандартных состояний) либо от `AggregateRoot` напрямую (для расширенного state).
 - Имя класса — существительное в единственном числе, PascalCase.
 
 ### Конструктор
@@ -216,7 +216,7 @@ class PersonalTransaction(EntityWithState):
 - Все имена приватных полей соответствуют именам параметров с префиксом `_`.
 
 ```python
-class PersonalTransaction(EntityWithState):
+class PersonalTransaction(AggregateRootWithState):
     _DELETED_MSG: ClassVar[str] = "транзакция была удалена, ее редактирование запрещено"
 
     def __init__(
@@ -235,7 +235,7 @@ class PersonalTransaction(EntityWithState):
         super().__init__(
             state=state,
             version=version,
-            aggregate_name=AggregateName("персональная транзакция"),
+            domain_object_name=DomainObjectName("персональная транзакция"),
         )
         self._transaction_id = transaction_id
         self._category_ids = category_ids
@@ -265,7 +265,7 @@ def name(self) -> PersonalTransactionName:
 - Имя property = имя поля без `_`.
 - Возвращаем VO, не примитив — клиент сам достанет нужное (`transaction.name.name`).
 - Коллекции храним и возвращаем в неизменяемом виде (`frozenset`, `tuple`). Внешний код не должен получать изменяемую ссылку на приватное состояние.
-- `version` / `original_version` / `aggregate_name` / `state` уже определены в базе — не переопределяем.
+- `version` / `original_version` / `domain_object_name` / `state` уже определены в базе — не переопределяем.
 
 ### Канонический шаблон метода-мутатора
 
@@ -379,7 +379,7 @@ def _validate_category_owners(
     if invalid:
         raise EntityInvalidDataError(
             msg="чужие категории нельзя назначить транзакции",
-            subject=next(iter(categories)).aggregate_name.name,
+            subject=next(iter(categories)).domain_object_name.name,
             data={
                 "categories": [
                     {"category_id": c.category_id.category_id} for c in invalid
@@ -400,7 +400,7 @@ def _validate_category_owners(
 ```python
 def raise_access_edit(self) -> None:
     self.raise_access_read()
-    if self._state.is_frozen():
+    if self._state == TenantState.FROZEN:
         raise EntityPolicyError(
             **self._error_data(
                 msg="вы заморожены",
@@ -416,13 +416,13 @@ def raise_access_edit(self) -> None:
 Если у агрегата состояний больше двух (например, `Tenant` имеет `ACTIVE` / `FROZEN` / `DELETED`):
 
 - Создаём свой enum в `domain/<aggregate>/value_object.py` (`TenantState`).
-- Класс наследует **`Entity`**, не `EntityWithState`.
+- Класс наследует **`AggregateRoot`**, не `AggregateRootWithState`.
 - Реализуем переходы (`activate`, `freeze`, `delete`, `new_state`) самостоятельно — каждый с проверкой идемпотентности и `_update_version`.
 - Реализуем свой `_check_state(data=None)` — он проверяет все «нерабочие» состояния (`is_deleted`, `is_frozen`).
 - Заводим столько `_*_MSG` `ClassVar`, сколько состояний нужно различать.
 
 ```python
-class Tenant(Entity):
+class Tenant(AggregateRoot):
     _DELETED_MSG: ClassVar[str] = "арендатор удален"
     _FROZEN_MSG: ClassVar[str] = "арендатор заморожен"
 
@@ -433,13 +433,13 @@ class Tenant(Entity):
         state: TenantState,
         version: Version,
     ) -> None:
-        super().__init__(version=version, aggregate_name=AggregateName("арендатор"))
+        super().__init__(version=version, domain_object_name=DomainObjectName("арендатор"))
         self._tenant_id = tenant_id
         self._status = status
         self._state = state
 
     def freeze(self) -> None:
-        if self._state.is_frozen():
+        if self._state == TenantState.FROZEN:
             raise EntityIdempotentError(
                 **self._error_data(
                     msg="арендатор уже заморожен",
@@ -452,9 +452,9 @@ class Tenant(Entity):
     def _check_state(self, data: dict[str, Any] | None = None) -> None:
         data = data or {}
         data["state"] = self._state.value
-        if self._state.is_deleted():
+        if self._state == TenantState.DELETED:
             raise EntityInvalidDataError(**self._error_data(self._DELETED_MSG, data))
-        if self._state.is_frozen():
+        if self._state == TenantState.FROZEN:
             raise EntityInvalidDataError(**self._error_data(self._FROZEN_MSG, data))
 
     def _error_data(self, msg: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -462,7 +462,7 @@ class Tenant(Entity):
         data["tenant_id"] = self._tenant_id.tenant_id
         return {
             "msg": msg,
-            "subject": self._aggregate_name.name,
+            "subject": self._domain_object_name.name,
             "data": {"tenant": data},
         }
 ```

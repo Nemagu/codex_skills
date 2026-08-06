@@ -32,6 +32,33 @@ description: "Используй при реализации или правке
 
 Пример формы контракта приведён в [runtime-design.md](references/runtime-design.md).
 
+## Стандартная структура и именование
+
+В новом сервисе воспроизводить этот каркас без альтернативных имён:
+
+```text
+presentation/background/
+├── runtime.py
+├── signals.py
+├── <operation_name>.py
+└── <technology>/<process_name>.py
+entrypoints/<process_name>.py
+```
+
+- `runtime.py`: `BackgroundRuntime`, `BackgroundRunner`, `RuntimeOptions`,
+  `WorkerTaskSpec`, `TaskStoppedError`, `ShutdownTimeoutError`.
+- `signals.py`: `FileHeartbeat`, `FileReadiness`, `FileHealthcheck` и
+  `ReadinessState` для HTTP-процесса, когда соответствующие сигналы требуются.
+- `<technology>/<process_name>.py`: `<ProcessName>Process`, immutable
+  `<ProcessName>Context`, публичный `build_runtime()` и `resources()`.
+- `<operation_name>.py`: `<OperationName>Task` с публичным `run()`.
+- `entrypoints/<process_name>.py`: `main()`, загружающий settings, выполняющий
+  preflight и запускающий результат `process.build_runtime()` через общий runner.
+
+Связывать роли только композицией. Не наследовать конкретные процессы или задачи
+от общего worker-класса. В существующем проекте сохранять эквивалентные имена,
+если их переименование не входит в задачу.
+
 ## Управление задачами
 
 - Используй только `asyncio.TaskGroup`.
@@ -91,6 +118,15 @@ description: "Используй при реализации или правке
 - Readiness отделяй от heartbeat. Если готовность зависит от последовательности
   исходов рабочей итерации, её обновляет владеющая итерацией задача через
   технический порт по согласованной политике.
+- Для headless worker-а без HTTP использовать стандартные файловые сигналы:
+  heartbeat с timestamp и отдельный readiness marker. Readiness probe считать
+  успешной только при наличии marker-а и свежем heartbeat.
+- Создавать readiness marker только после подготовки обязательных ресурсов;
+  удалять до startup, при снятии готовности и в `finally` shutdown.
+- Предоставлять import-safe `entrypoints/healthcheck.py`, который загружает config,
+  проверяет `liveness` или `readiness` и возвращает код `0` либо `1`.
+- Не проверять из probe PostgreSQL/NATS напрямую: это не подтверждает движение
+  рабочей задачи и создаёт отдельную нагрузку на зависимости.
 
 ## Логирование
 
@@ -127,6 +163,8 @@ description: "Используй при реализации или правке
 - Периодический и progress heartbeat не смешаны; выбранный режим соответствует
   требованиям.
 - Readiness не выводится из heartbeat и изменяется только согласованным владельцем.
+- Файловая readiness наблюдаема снаружи и невозможна при устаревшем heartbeat.
 - Интервалы прерываются остановкой.
 - Логирование присутствует согласно требованиям.
 - Unit-тесты покрывают запуск, fail-fast, остановку, timeout, сигналы, heartbeat, `ExceptionGroup`, отмену и exit codes.
+- Новый сервис следует стандартной структуре и имеет отдельный entrypoint.

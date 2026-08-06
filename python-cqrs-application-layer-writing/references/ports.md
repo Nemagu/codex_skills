@@ -169,13 +169,6 @@ class ProjectVersionRepository(ABC):
     @abstractmethod
     async def save(self, record: ProjectVersionRecordDTO) -> None:
         ...
-
-    @abstractmethod
-    async def batch_save(
-        self,
-        records: tuple[ProjectVersionRecordDTO, ...],
-    ) -> None:
-        ...
 ```
 
 Snapshot DTO фиксирует VO и immutable-коллекции в конкретной точке. Он не хранит
@@ -227,16 +220,11 @@ class EventPublisher(ABC):
     @abstractmethod
     async def publish(self, event: PublishEventDTO) -> None:
         ...
-
-    @abstractmethod
-    async def batch_publish(
-        self,
-        events: tuple[PublishEventDTO, ...],
-    ) -> None:
-        ...
 ```
 
-Добавляй только реально используемый метод. Размер batch, порядок, повторы,
+Добавляй batch-метод только когда application-операция действительно передаёт
+набор одним вызовом. Не вводи его ради оптимизации адаптера, тестовой подготовки
+данных или предполагаемого будущего сценария. Размер batch, порядок, повторы,
 частичный успех и отметку публикации реализуй согласно операции.
 
 ## Ошибки портов

@@ -8,7 +8,9 @@ Domain service реализует заданное бизнес-правило, 
 агрегату или проекции. Не создавай сервис и не придумывай правило только по
 структуре данных.
 
-Расположение: `domain/<aggregate>/service.py`. Один файл на агрегат, в нём — все сервисы, относящиеся к этому агрегату. Если файл становится большим (>200 строк) — можно разделить на отдельные модули, но это редкий случай.
+Расположение: `domain/<aggregate>/service.py`. Один файл на агрегат, в нём — все
+сервисы, относящиеся к этому агрегату. Разделяй его на отдельные модули, когда
+сервисы образуют самостоятельные группы ответственностей.
 
 ### Когда нужен domain service vs другие места
 
@@ -89,7 +91,7 @@ class UserUniquenessService:
         if existing:
             raise EntityAlreadyExistsError(
                 msg=f'пользователь с id "{existing.user_id.user_id}" уже существует',
-                subject=existing.projection_name.name,
+                subject=existing.domain_object_name.name,
                 data={"user": {"user_id": existing.user_id.user_id}},
             )
 ```
@@ -110,10 +112,10 @@ class TransactionCategoryUniquenessService:
         if category is None:
             return
 
-        if category.state.is_deleted():
+        if category.state == State.DELETED:
             raise EntityAlreadyExistsError(
                 msg="название категории транзакции уже используется, но она была ранее удалена",
-                subject=category.aggregate_name.name,
+                subject=category.domain_object_name.name,
                 data={
                     "category_id": category.category_id.category_id,
                     "name": name.name,
@@ -121,7 +123,7 @@ class TransactionCategoryUniquenessService:
             )
         raise EntityAlreadyExistsError(
             msg="название категории транзакции уже используется",
-            subject=category.aggregate_name.name,
+            subject=category.domain_object_name.name,
             data={
                 "category_id": category.category_id.category_id,
                 "name": name.name,
@@ -131,8 +133,8 @@ class TransactionCategoryUniquenessService:
 
 **Правила:**
 - Параметры — VO (или связанные агрегаты), не примитивы.
-- `subject` берётся из `aggregate_name.name` найденного агрегата.
-- При различающихся бизнес-сообщениях (как с `is_deleted`) — отдельная ветка.
+- `subject` берётся из `domain_object_name.name` найденного агрегата.
+- При различающихся бизнес-сообщениях для разных состояний — отдельная ветка.
 
 ---
 
@@ -154,7 +156,7 @@ class TransactionOwnershipPolicy:
         if tenant.tenant_id != category.owner_id:
             raise EntityPolicyError(
                 msg="только владелец может работать с категорией транзакции",
-                subject=tenant.aggregate_name.name,
+                subject=tenant.domain_object_name.name,
                 data={
                     "tenant": {"tenant_id": tenant.tenant_id.tenant_id},
                     "category": {
@@ -167,7 +169,7 @@ class TransactionOwnershipPolicy:
 
 **Правила:**
 - Параметры — оба агрегата целиком, не их части.
-- Имя метода — `raise_<rule>` (как у методов-предикатов агрегата).
+- Имя метода — `raise_<rule>` (как у policy-методов агрегата).
 - В `data` кладём оба агрегата с их идентификаторами и полями, которые участвовали в нарушении.
 - `subject` обычно — имя того агрегата, чьё право проверяется, но допустимо и имя ущемляемой стороны.
 

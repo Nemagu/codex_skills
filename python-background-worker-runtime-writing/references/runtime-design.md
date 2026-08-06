@@ -18,6 +18,10 @@ class RuntimeOptions:
 
 `WorkerTask` принимает готовый контекст и `asyncio.Event`. Конкретный тип контекста определяется composition root.
 
+Общие имена из примера являются обязательным каркасом нового сервиса. Конкретный
+composition root называть `<ProcessName>Process`, его контекст —
+`<ProcessName>Context`, рабочий цикл — `<OperationName>Task`.
+
 ## Последовательность запуска
 
 1. Runner создаёт stop event и устанавливает signal handlers.
@@ -43,6 +47,7 @@ class RuntimeOptions:
 | Shutdown timeout | Процесс завершён с ненулевым кодом |
 | Ошибка периодического heartbeat | Runtime завершается fail-fast |
 | Progress heartbeat | Обновляется владеющей циклом задачей после заданных исходов |
+| Headless readiness | Marker существует только при свежем heartbeat и готовых ресурсах |
 | Ожидание интервала | Stop event прерывает ожидание |
 
 Runtime не перебирает task specifications на каждой итерации и не синхронизирует

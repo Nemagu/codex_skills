@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Code Style"
+  short_description: "Единый стиль прикладного Python-кода"
+  default_prompt: "Используй $python-code-style-writing при написании и ревью Python-кода."

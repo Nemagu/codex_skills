@@ -32,12 +32,12 @@
 - [ ] VO создаются в порядке зависимостей.
 - [ ] Реализованы только заданные нормализация, ограничения и равенство.
 
-### Шаг 3 — `entity.py`
+### Шаг 3 — `aggregate.py`
 
-- [ ] Импорты: `EntityWithState` или `Entity` из `domain.entity`, нужные ошибки, ID-VO связанных агрегатов из их витрин, локальные VO из `value_object.py`, общие VO из `domain.value_object`.
-- [ ] Класс `<Aggregate>(EntityWithState)` или `<Aggregate>(Entity)`.
+- [ ] Импорты: `AggregateRootWithState` или `AggregateRoot` из `domain.aggregate`, нужные ошибки, ID-VO связанных агрегатов из их витрин, локальные VO из `value_object.py`, общие VO из `domain.value_object`.
+- [ ] Класс `<Aggregate>(AggregateRootWithState)` или `<Aggregate>(AggregateRoot)`.
 - [ ] `_DELETED_MSG: ClassVar[str] = ...` (плюс другие `_*_MSG` при расширенном состоянии).
-- [ ] Конструктор: параметры — VO; вызов `super().__init__(...)` с `aggregate_name=AggregateName("...")`; присваивание приватных полей.
+- [ ] Конструктор: параметры — VO; вызов `super().__init__(...)` с `domain_object_name=DomainObjectName("...")`; присваивание приватных полей.
 - [ ] Properties для всех приватных полей (read-only, имя без `_`).
 - [ ] Коллекции VO хранятся и возвращаются как `frozenset` или `tuple`.
 - [ ] Перед мутацией выполнены все заданные проверки.
@@ -94,17 +94,17 @@
 - [ ] Отдельный неизменяемый VO для каждого заданного поля проекции.
 - [ ] ID-parity реализован только при наличии явного требования.
 
-### Шаг 3 — `projection.py` (не `entity.py`!)
+### Шаг 3 — `projection.py` (не `aggregate.py`!)
 
 - [ ] Импорты: `ProjectionWithState` или `Projection` из `domain.projection`.
 - [ ] Класс `<Projection>(ProjectionWithState)` или `<Projection>(Projection)`.
 - [ ] **Никаких** `_DELETED_MSG` — у проекции нет `_check_state`.
-- [ ] Конструктор с `super().__init__(..., projection_name=ProjectionName("..."))`.
+- [ ] Конструктор с `super().__init__(..., domain_object_name=DomainObjectName("..."))`.
 - [ ] Properties для всех приватных полей.
 - [ ] Реализованы только заданные операции проекции.
 - [ ] Новая версия принимается извне и не инкрементируется проекцией.
 - [ ] Transport-модели и application DTO не передаются в domain.
-- [ ] Реализация `_error_data` с `subject=self._projection_name.name`.
+- [ ] Реализация `_error_data` с `subject=self._domain_object_name.name`.
 
 ### Шаг 4 — `factory.py`
 
@@ -149,7 +149,6 @@
 - [ ] Каждое успешное поведение, меняющее агрегат, увеличивает версию ровно один раз.
 - [ ] После доменного отказа состояние и версия не изменены.
 - [ ] У проекции **нет** `_update_version` в state-методах и нет `_check_state`.
-- [ ] Все доменные ошибки бросаются с kwargs (`msg=`, `subject=`, `data=`).
 - [ ] `data` ошибок собирается по конвенции (английский snake_case ключ-сущность на верхнем уровне, поля сущности внутри).
 - [ ] Все приватные поля начинаются с `_` и имеют read-only `@property`.
 - [ ] Каждое поле представлено отдельным неизменяемым VO.

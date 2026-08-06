@@ -237,7 +237,6 @@ application handlers и адаптеры. Статический router допу
 Начинать с `router.py`, `model.py`, `mapping.py`, `dependency.py` внутри внешней
 API-возможности. Разделять на подпапки `router/`, `model/`, `mapping/`, когда:
 
-- файл превышает примерно 300 строк;
 - в нём более 8–10 endpoint-ов;
 - command/query части стали устойчивыми группами;
 - смешиваются несколько API-версий;

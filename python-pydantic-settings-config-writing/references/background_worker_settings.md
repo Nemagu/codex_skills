@@ -29,6 +29,9 @@ class RuntimeSettings(ConfigModel):
 
 
 class PublishEventsTaskSettings(ConfigModel):
+    heartbeat_file: Path
+    readiness_file: Path
+    heartbeat_timeout_ms: PositiveMilliseconds
     idle_delay_ms: PositiveMilliseconds
     retry_delay_ms: PositiveMilliseconds
     operation_timeout_ms: PositiveMilliseconds
@@ -59,6 +62,9 @@ runtime:
   shutdown_timeout_ms: 30000
 
 publish_events:
+  heartbeat_file: /app/run/publisher-heartbeat
+  readiness_file: /app/run/publisher-ready
+  heartbeat_timeout_ms: 60000
   idle_delay_ms: 1000
   retry_delay_ms: 1000
   operation_timeout_ms: 30000

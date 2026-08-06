@@ -12,8 +12,8 @@ description: "Используй при реализации или правке
 3. Определить минимальные неизменяемые параметры и зависимости фабрики.
 4. Собрать типизированный runtime context через lifespan.
 5. Зарегистрировать заданные routers, handlers и middleware в явном порядке.
-6. Настроить подходящий режим Uvicorn и graceful shutdown.
-7. Проверить startup, shutdown, ошибки, health endpoints и middleware.
+6. Добавить отдельный entrypoint и настроить режим Uvicorn и graceful shutdown.
+7. Проверить startup, shutdown, entrypoint, ошибки, health endpoints и middleware.
 
 Не спрашивать повторно о поведении, однозначно заданном требованиями или кодом.
 Задать вопрос только при противоречии, небезопасном решении или выборе, меняющем
@@ -51,11 +51,29 @@ configuration -> composition root -> application factory -> ASGI application
 - Lifespan создаёт process-scoped ресурсы и runtime context.
 - Runner запускает приложение, но не определяет его маршруты и зависимости.
 
-Сохранять существующие имена и структуру проекта. Новые имена вроде
-`create_api_app`, `APIRuntimeContext` и `APIWorker` считать примерами, а не
-обязательным контрактом.
+В новом сервисе использовать `APIWorker` как стандартное имя process-level
+сборщика и runner-а. Имена фабрики приложения и runtime context адаптировать к
+существующим терминам проекта. При правке существующего сервиса не выполнять
+механическое переименование эквивалентных ролей без отдельной задачи.
 
 Подробный вариант: [фабрика приложения](references/application_factory.md).
+
+## Entrypoint API-процесса
+
+В новом сервисе использовать структуру этого репозитория:
+
+- `entrypoints/api.py` содержит import-safe `main()` и защиту
+  `if __name__ == "__main__"`;
+- `main()` загружает `APIWorkerSettings`, выполняет startup preflight и вызывает
+  `APIWorker(settings).run()`;
+- `presentation/api/server.py` содержит `APIWorker`, который собирает приложение
+  и настраивает Uvicorn;
+- фабрика приложения, lifespan, routers и middleware не размещаются в entrypoint;
+- импорт entrypoint не читает конфигурацию, не открывает ресурсы, не применяет
+  миграции и не запускает сервер.
+
+В существующем проекте сохранять эквивалентную точку входа, если переименование
+не входит в задачу.
 
 ## Конфигурируемые параметры
 
@@ -205,6 +223,7 @@ scheme, host или client IP из недоверенных заголовков
 - liveness/readiness;
 - CORS только при его включении;
 - сборку выбранного режима Uvicorn без открытия production-порта.
+- вызов `main()` с подменёнными loader, preflight и `APIWorker` без открытия порта.
 
 ## Антипаттерны
 
@@ -230,6 +249,7 @@ scheme, host или client IP из недоверенных заголовков
 - Middleware и их порядок соответствуют требованиям.
 - Ошибки преобразуются безопасно и логируются один раз.
 - Режим Uvicorn совместим со способом передачи приложения.
+- Отдельный import-safe entrypoint доводит сборку до `APIWorker.run()`.
 - Health, proxy, CORS и OpenAPI не включены неявно.
 - Согласованные проверки проходят.
 
