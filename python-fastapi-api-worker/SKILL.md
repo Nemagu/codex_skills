@@ -1,6 +1,6 @@
 ---
 name: python-fastapi-api-worker
-description: "Используй при реализации или правке сборки HTTP API-процесса на FastAPI: фабрики приложения, типизированного runtime context, lifespan shared-ресурсов, middleware, error boundary, health endpoints и запуска через Uvicorn. Не применять для определения HTTP-контрактов, реализации конкретных endpoint-ов и transport-моделей, application/domain-логики, persistence-адаптеров и фоновых worker-ов."
+description: "Используй при реализации или правке сборки HTTP API-процесса на FastAPI: фабрики приложения, типизированного runtime context, lifespan shared-ресурсов, middleware, logging context запроса, error boundary, health endpoints и запуска через Uvicorn. Не применять для определения HTTP-контрактов, реализации конкретных endpoint-ов и transport-моделей, application/domain-логики, persistence-адаптеров и фоновых worker-ов."
 ---
 
 # Сборка API-воркера на FastAPI
@@ -163,11 +163,21 @@ Presentation обрабатывает:
 из HTTP-требований, а не из полей внутреннего исключения.
 
 - Не возвращать stack trace, внутреннее исключение и технические детали.
-- Непредвиденное исключение логировать ровно один раз с `exc_info`.
-- Access log не должен повторять stack trace.
+- Применять `python-service-logging-writing` и logging-профиль HTTP API.
+- Создавать request context на внешней middleware до вызова downstream и очищать
+  его в `finally`, включая disconnect, timeout, cancellation и исключение.
+- Итоговую запись формировать после получения ответа либо безопасного error
+  response; измерять полную длительность монотонными часами.
+- Непредвиденное исключение логировать ровно один раз с `exc_info` на общей
+  error boundary. Итоговая middleware не должна добавлять второй stack trace.
+- Передавать из error handlers безопасную классификацию результата, не извлекая
+  внутренние исключения повторно.
+- Отключать или перенастраивать Uvicorn access/error logs, если они дублируют
+  согласованную итоговую запись или stack trace.
 - Ожидаемые ошибки логировать только на предусмотренном уровне.
 - Передавать request ID через logging context.
 - Не логировать authorization, cookies, секреты и произвольные тела.
+- Не логировать успешные healthcheck, если профиль прямо этого не требует.
 
 Подробности: [обработка ошибок](references/error_handling.md).
 
@@ -220,6 +230,8 @@ scheme, host или client IP из недоверенных заголовков
 - порядок и эффекты заданных middleware;
 - безопасные application и unexpected error responses;
 - отсутствие двойного логирования;
+- очистку и изоляцию request context для параллельных запросов;
+- обязательные поля, уровни и события logging-профиля;
 - liveness/readiness;
 - CORS только при его включении;
 - сборку выбранного режима Uvicorn без открытия production-порта.

@@ -1,6 +1,6 @@
 ---
 name: python-nats-jetstream-consumer-writing
-description: "Используй при реализации или правке входящего NATS JetStream consumer на Python через nats-py: pull consumer, durable-конфигурация, envelope и payload, mapping в application-вход, bounded concurrency, backpressure, ACK/NAK/TERM, in-progress, redelivery, reconnect, идемпотентность и необязательный DLQ. Не применять для publisher, общего runtime процесса, исходящих адаптеров и application/domain-логики."
+description: "Используй при реализации или правке входящего NATS JetStream consumer на Python через nats-py: pull consumer, durable-конфигурация, envelope и payload, mapping в application-вход, bounded concurrency, backpressure, ACK/NAK/TERM, логирование обработки, in-progress, redelivery, reconnect, идемпотентность и необязательный DLQ. Не применять для publisher, общего runtime процесса, исходящих адаптеров и application/domain-логики."
 ---
 
 # NATS JetStream consumer на Python
@@ -128,7 +128,24 @@ DLQ добавляй только по требованиям:
 
 ## Логирование
 
-Логирование consumer-воркера обязательно. События, уровни и поля определяются требованиями. Не логируй payload, секреты и чувствительные headers. Не дублируй логирование одного исключения на нескольких границах.
+Применяй `python-service-logging-writing` и logging-профиль consumer-а. Consumer
+владеет operation context сообщения и одной итоговой записью после определения
+и выполнения транспортного исхода.
+
+- Связывай согласованные metadata сообщения до валидации payload, чтобы
+  окончательный отказ имел диагностический контекст.
+- Сохраняй стабильный message ID при redelivery; не генерируй его вопреки
+  контракту владельца.
+- Измеряй полную длительность от принятия сообщения до итогового ACK-действия
+  монотонными часами.
+- Записывай ACK, NAK или TERM только после фактического завершения действия. Если
+  транспортный сбой нельзя выразить согласованным outcome, сначала дополни
+  logging-контракт, а не выдавай намерение за результат.
+- Очищай контекст сообщения в `finally`, включая validation error, timeout,
+  cancellation и ошибку отправки подтверждения.
+- Не логируй payload, чувствительные headers и произвольный текст исключения.
+- Application, delivery policy и NATS-адаптер не повторяют итоговую запись или
+  stack trace consumer-а.
 
 ## Тестирование
 
@@ -170,5 +187,6 @@ Unit-тестами покрой:
 - Reconnect не дублируется ручным циклом.
 - At-least-once и идемпотентность отражены явно.
 - Топология не изменяется разрушительно.
-- Логирование присутствует согласно требованиям.
+- Поля сообщения, длительность и итог ACK/NAK/TERM соответствуют logging-профилю,
+  контекст не протекает между конкурентными обработчиками.
 - Unit- и integration-тесты проверяют собственную логику, а не внутренности `nats-py`.

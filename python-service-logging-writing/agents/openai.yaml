@@ -1,0 +1,4 @@
+interface:
+  display_name: "Логирование Python-сервиса"
+  short_description: "Единообразное структурированное логирование процессов"
+  default_prompt: "Используй $python-service-logging-writing, чтобы реализовать логирование процесса по согласованному контракту сервиса."

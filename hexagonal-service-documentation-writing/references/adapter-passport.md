@@ -52,7 +52,7 @@ docs/adapters/incoming/<adapter-name>.md
 docs/adapters/outgoing/<adapter-name>.md
 ```
 
-Имя файла писать в `kebab-case`. Каталоги и `docs/adapters/README.md` создавать только
+Имя файла писать в `snake_case`. Каталоги и `docs/adapters/README.md` создавать только
 при появлении первого паспорта. `README.md` содержит краткое назначение раздела и
 ссылки на все паспорта.
 
