@@ -9,6 +9,7 @@ Python-сервисов с DDD, CQRS и гексагональной архит�
 skill-library/
 ├── implementation/  # реализация, конфигурация, runtime, CI и тесты
 ├── documentation/   # проектирование и ведение документации
+├── orchestration/   # сквозные циклы реализации и доработки документации
 └── review/          # независимые проверки реализации и документации
 ```
 
@@ -34,7 +35,8 @@ codex_dir="${CODEX_HOME:-$HOME/.codex}"
 skills_dir="$codex_dir/skills"
 mkdir -p "$skills_dir"
 
-find "$repo_dir/implementation" "$repo_dir/documentation" "$repo_dir/review" \
+find "$repo_dir/implementation" "$repo_dir/documentation" \
+  "$repo_dir/orchestration" "$repo_dir/review" \
   -mindepth 1 -maxdepth 1 -type d -print0 |
 while IFS= read -r -d '' skill_dir; do
   link_path="$skills_dir/$(basename "$skill_dir")"
@@ -68,7 +70,7 @@ $CodexDir = if ($env:CODEX_HOME) {
 $SkillsDir = Join-Path $CodexDir "skills"
 New-Item -ItemType Directory -Force -Path $SkillsDir | Out-Null
 
-$Groups = @("implementation", "documentation", "review")
+$Groups = @("implementation", "documentation", "orchestration", "review")
 foreach ($Group in $Groups) {
     Get-ChildItem -LiteralPath (Join-Path $RepoDir $Group) -Directory |
         ForEach-Object {
@@ -94,6 +96,7 @@ Codex.
 ```text
 implementation/<skill-name>/
 documentation/<skill-name>/
+orchestration/<skill-name>/
 review/<skill-name>/
 ```
 
