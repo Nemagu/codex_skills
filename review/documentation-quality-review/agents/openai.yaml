@@ -1,0 +1,4 @@
+interface:
+  display_name: "Documentation Quality Review"
+  short_description: "Audit documentation completeness and consistency"
+  default_prompt: "Use $documentation-quality-review to audit this documentation without editing it."

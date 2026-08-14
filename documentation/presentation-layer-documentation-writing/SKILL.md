@@ -35,7 +35,7 @@ Presentation владеет внешними моделями, транспор�
 
 - HTTP API — `presentation/http/`;
 - входящие сообщения — `presentation/messages/`;
-- фоновые процессы — `presentation/background-processes/`.
+- фоновые процессы — `presentation/background_processes/`.
 
 Исходящие внешние контракты и паспорта исходящих адаптеров в этот слот не
 помещать. Формировать поддерево «Презентационный слой» в порядке: HTTP API,

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Documentation Implementation Consistency Review"
+  short_description: "Compare implementation with normative documentation"
+  default_prompt: "Use $documentation-implementation-consistency-review to compare this implementation with its documentation without fixing it."

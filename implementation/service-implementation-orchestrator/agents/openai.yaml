@@ -1,0 +1,4 @@
+interface:
+  display_name: "Service Implementation Orchestrator"
+  short_description: "Implement a documented service end to end"
+  default_prompt: "Use $service-implementation-orchestrator to implement the documented scope completely and verify it end to end."

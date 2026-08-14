@@ -1,0 +1,4 @@
+interface:
+  display_name: "Implementation Skill Compliance Review"
+  short_description: "Audit code against applicable implementation skills"
+  default_prompt: "Use $implementation-skill-compliance-review to audit this implementation without fixing it."

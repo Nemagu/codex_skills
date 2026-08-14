@@ -1,0 +1,4 @@
+interface:
+  display_name: "Documentation Improvement Orchestrator"
+  short_description: "Review and improve documentation to completion"
+  default_prompt: "Use $documentation-improvement-orchestrator to review and improve the requested documentation until it is ready for implementation."

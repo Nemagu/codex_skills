@@ -33,7 +33,7 @@ docs/
 │   ├── README.md
 │   ├── http/
 │   ├── messages/
-│   └── background-processes/
+│   └── background_processes/
 ├── external-contracts/
 │   ├── README.md
 │   └── outgoing/
@@ -58,7 +58,7 @@ docs/
 |`application`|Команды, запросы, DTO, порты и составные сценарии|Транспортные модели и реализации портов|
 |`presentation/http`|Входящие HTTP-контракты и преобразования|Application DTO как внешние модели|
 |`presentation/messages`|Входящие сообщения и их обработка на границе|Исходящие сообщения и runtime consumer-а|
-|`presentation/background-processes`|Внутренние инициаторы application-операций, расписание и lifecycle|Реализация runtime и application-логика|
+|`presentation/background_processes`|Внутренние инициаторы application-операций, расписание и lifecycle|Реализация runtime и application-логика|
 |`external-contracts/outgoing`|Контракты, публикуемые сервисом внешним потребителям|Реализация publisher-а|
 |`adapters/incoming`|Паспорта неочевидных реализаций входящих границ|Нормативные presentation-контракты|
 |`adapters/outgoing`|Паспорта реализаций application-портов|Владение application-портами и внешними контрактами|
