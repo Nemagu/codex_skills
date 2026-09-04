@@ -2,14 +2,36 @@
 
 ## Граница ответственности
 
-Consumer управляет только stream и subjects, явно перечисленными в его типизированной
-конфигурации. Subject не является отдельным ресурсом JetStream: обеспечить subject
-означает добавить его pattern в конфигурацию stream.
+Факт подписки не определяет владельца topology. Независимо зафиксируй:
 
-Создание или изменение durable consumer остаётся отдельным решением и не следует
-автоматически из разрешения обеспечивать stream topology.
+| Ресурс | Режим | Разрешённые действия runtime consumer-а |
+|---|---|---|
+| Stream/subjects | Publisher-owned / external | Только проверить ожидаемую принадлежность и совместимость |
+| Stream/subjects | Consumer-managed additive | Создать отсутствующий stream или добавить отсутствующий subject |
+| Stream/subjects | Platform-provisioned | Только проверить; provisioning выполняется вне runtime |
+| Durable consumer | Consumer-owned ensure | Создать отсутствующий собственный durable, проверить и bind |
+| Durable consumer | Externally provisioned bind-only | Проверить существующий durable и bind |
 
-## Алгоритм topology ensure
+Для межсервисного события без явного обратного требования выбирай publisher-owned
+stream/subjects. Publisher обычно уже обеспечивает их перед публикацией. Собственный
+уникальный durable может при этом оставаться consumer-owned: это независимое решение.
+
+Subject не является отдельным ресурсом JetStream: добавление subject означает
+изменение конфигурации stream и требует владения этим stream. Ни один режим не
+разрешает автоматически удалять или пересоздавать stream либо consumer.
+
+## Publisher-owned и platform-provisioned stream
+
+1. Локально проверь stream, filter subjects и отсутствие конфликтующих маршрутов.
+2. Найди stream, покрывающий каждый filter subject, и получи его актуальную
+   конфигурацию.
+3. Проверь, что subject принадлежит ожидаемому stream и совместим с требованиями.
+4. Не вызывай `add_stream`, `update_stream` и другие операции мутации даже при
+   отсутствии stream или subject.
+5. Классифицируй отсутствие как временную неготовность либо startup error согласно
+   выбранному эксплуатационному контракту.
+
+## Consumer-managed additive stream
 
 1. Локально проверь полноту stream-конфигурации и согласованность filter subjects.
 2. Получи актуальный `stream_info`.
@@ -23,13 +45,46 @@ Consumer управляет только stream и subjects, явно переч
 Если создание невозможно из-за неполной конфигурации, запроси недостающие значения.
 Не придумывай retention, storage, replicas, limits или другие параметры stream.
 
+## Durable consumer
+
+Для обоих режимов сначала сформируй полный явный `ConsumerConfig`: как минимум
+durable name, filter subject, delivery и ACK policy, `ack_wait`, `max_deliver` и
+управляемые pending/replica limits. Не полагайся на defaults `pull_subscribe`.
+
+### Consumer-owned ensure
+
+1. Получи `consumer_info` по ожидаемому stream и уникальному durable name.
+2. Если durable отсутствует, вызови `add_consumer` с полным контрактом.
+3. Если другая реплика создала его конкурентно, ограниченно перечитай состояние.
+4. Проверь итоговую конфигурацию по всем управляемым полям.
+5. Привяжись через `pull_subscribe_bind` или эквивалентный bind-only API.
+
+### Externally provisioned bind-only
+
+1. Получи `consumer_info`.
+2. Если durable отсутствует, ничего не создавай; примени согласованную политику
+   retry или startup failure.
+3. Проверь существующий durable по всем управляемым полям.
+4. Привяжись только через bind-only API.
+
+Несовместимый существующий durable не обновляй, не удаляй и не пересоздавай.
+Верни явную ошибку с перечнем несовпадающих полей. Не используй общие имена вроде
+`consumer_user_create`: имя должно идентифицировать логического подписчика, иначе
+разные сервисы разделят delivery одного durable вместо получения своих копий.
+
 ## Классификация исходов
 
 | Ситуация | Исход |
 |---|---|
-| Stream отсутствует | Создать и проверить итог |
-| Stream появился конкурентно | Перечитать и проверить итог |
-| Требуемый subject не покрывается stream | Добавить subject и проверить итог |
+| External/platform stream отсутствует | Не изменять; retry или startup error по контракту |
+| External/platform subject отсутствует | Не изменять; retry или startup error по контракту |
+| Consumer-managed stream отсутствует | Создать и проверить итог |
+| Consumer-managed stream появился конкурентно | Перечитать и проверить итог |
+| Consumer-managed subject не покрывается stream | Добавить subject и проверить итог |
+| Consumer-owned durable отсутствует | Создать полным config, перечитать и проверить |
+| Consumer-owned durable появился конкурентно | Перечитать и проверить итог |
+| Externally provisioned durable отсутствует | Не создавать; retry или startup error по контракту |
+| Существующий durable несовместим | Фатальная ошибка без автоматической мутации |
 | Stream/subject исчез между ensure и subscribe | Снять readiness, подождать, повторить ensure и subscribe |
 | Временный ответ о ещё не готовой topology | Снять readiness, подождать, повторить |
 | Subject принадлежит несовместимому stream | Фатальная ошибка конфигурации |
@@ -45,10 +100,11 @@ retryable-состояние поиском текста в сообщении �
 Цикл выполняет последовательность:
 
 1. снять readiness;
-2. выполнить topology ensure;
-3. создать или привязать subscription;
-4. установить readiness после успешной привязки;
-5. передать управление pull-loop.
+2. проверить либо обеспечить stream/subjects согласно выбранному режиму;
+3. проверить либо обеспечить durable согласно выбранному режиму;
+4. привязать subscription через bind-only API;
+5. установить readiness после успешной привязки;
+6. передать управление pull-loop.
 
 При retryable-исходе topology/subscription цикл остаётся живым, выполняет stop-aware
 ожидание и начинает последовательность заново. При остановке ожидание завершается
@@ -71,9 +127,16 @@ retryable-состояние поиском текста в сообщении �
 
 ## Тестовые инварианты
 
-- Повторный ensure идемпотентен.
-- Конкурентный ensure приводит к тому же итоговому stream.
+- Режимы владения stream/subjects и durable выбираются независимо.
+- External/platform режим ни при каком исходе не мутирует stream/subjects.
+- Повторный consumer-managed ensure идемпотентен.
+- Конкурентный consumer-managed ensure приводит к тому же итоговому stream.
 - Update сохраняет посторонние subjects и все неуправляемые поля `StreamConfig`.
+- Consumer-owned durable создаётся из полного config и выдерживает конкурентный
+  startup по схеме create-or-observe.
+- Externally provisioned durable никогда не создаётся runtime consumer-ом.
+- После подготовки используется bind-only API без скрытого provisioning-а.
+- Несовместимый durable остаётся неизменным и даёт фатальную ошибку.
 - Retryable-исход не завершает runtime-задачу и снимает readiness.
 - Stop event прерывает ожидание без дополнительной попытки.
 - Успешная повторная подписка восстанавливает readiness и запускает pull-loop.
