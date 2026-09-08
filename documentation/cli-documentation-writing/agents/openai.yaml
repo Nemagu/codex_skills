@@ -1,0 +1,4 @@
+interface:
+  display_name: "Документирование CLI"
+  short_description: "Проектирование документации контрактов CLI"
+  default_prompt: "Используй $cli-documentation-writing для подготовки документации CLI-контракта."
