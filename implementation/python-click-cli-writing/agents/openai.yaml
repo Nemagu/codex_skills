@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Click CLI"
+  short_description: "Реализация CLI на Python с Click"
+  default_prompt: "Используй $python-click-cli-writing для реализации CLI-команды на Click."
