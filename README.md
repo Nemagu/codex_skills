@@ -7,6 +7,7 @@ Python-сервисов с DDD, CQRS и гексагональной архит�
 
 ```text
 skill-library/
+├── AGENTS.md        # глобальные инструкции Codex
 ├── implementation/  # реализация, конфигурация, runtime, CI и тесты
 ├── documentation/   # проектирование и ведение документации
 ├── orchestration/   # сквозные циклы реализации и доработки документации
@@ -48,6 +49,17 @@ while IFS= read -r -d '' skill_dir; do
 done
 ```
 
+Подключить глобальные инструкции, если путь ещё не занят:
+
+```bash
+agents_path="$codex_dir/AGENTS.md"
+if [ -e "$agents_path" ] || [ -L "$agents_path" ]; then
+  printf 'Пропущен существующий путь: %s\n' "$agents_path"
+else
+  ln -s "$repo_dir/AGENTS.md" "$agents_path"
+fi
+```
+
 ## Установка на Windows
 
 В PowerShell клонировать репозиторий:
@@ -85,9 +97,23 @@ foreach ($Group in $Groups) {
 }
 ```
 
-После добавления новых скилов повторно выполнить соответствующую команду создания
-ссылок. Если новый скил не появился в каталоге Codex автоматически, перезапустить
-Codex.
+Подключить глобальные инструкции, если путь ещё не занят:
+
+```powershell
+$AgentsPath = Join-Path $CodexDir "AGENTS.md"
+if (Test-Path -LiteralPath $AgentsPath) {
+    Write-Host "Пропущен существующий путь: $AgentsPath"
+} else {
+    New-Item -ItemType SymbolicLink -Path $AgentsPath `
+        -Target (Join-Path $RepoDir "AGENTS.md") | Out-Null
+}
+```
+
+Команды установки не перезаписывают существующие пути. Если `AGENTS.md` уже
+существует, сначала перенести его актуальное содержимое в файл репозитория, а затем
+заменить его ссылкой. После добавления новых скилов повторно выполнить
+соответствующую команду создания ссылок. Если новый скил или изменённые глобальные
+инструкции не появились в Codex автоматически, перезапустить Codex.
 
 ## Добавление скила
 
