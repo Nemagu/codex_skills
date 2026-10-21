@@ -1,0 +1,7 @@
+interface:
+  display_name: "Документирование решений"
+  short_description: "Обсуждение и фиксация решений разных слоёв"
+  default_prompt: "Используй $decision-record-writing, чтобы обсудить решение и по моему согласию оформить запись с его обоснованием."
+
+policy:
+  allow_implicit_invocation: true
